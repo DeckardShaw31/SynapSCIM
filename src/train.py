@@ -16,12 +16,18 @@ def get_device():
         torch.backends.cudnn.benchmark = True
         return device
     try:
-        import torch_xla.core.xla_model as xm
-        device = xm.xla_device()
+        import torch_xla
+        device = torch_xla.device()
         print("TPU accelerator detected via PyTorch XLA.")
         return device
-    except ImportError:
-        pass
+    except (ImportError, AttributeError):
+        try:
+            import torch_xla.core.xla_model as xm
+            device = xm.xla_device()
+            print("TPU accelerator detected via PyTorch XLA.")
+            return device
+        except ImportError:
+            pass
     return torch.device("cpu")
 
 def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_context=10, save_path="bdh_ppo_model_3000.pt"):
@@ -50,8 +56,8 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
         dropout=0.05
     ).to(device)
     
-    # PyTorch 2.0+ Model Compilation for speedups (skip if on CPU or Windows CPU to avoid overhead)
-    if hasattr(torch, "compile") and device.type in ["cuda", "xla"]:
+    # PyTorch 2.0+ Model Compilation for speedups (skip if on CPU or TPU to avoid Inductor exceptions)
+    if hasattr(torch, "compile") and device.type == "cuda":
         try:
             print("Compiling model for speed optimization...")
             model = torch.compile(model)

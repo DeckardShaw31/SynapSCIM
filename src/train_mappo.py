@@ -22,13 +22,18 @@ def get_device():
         torch.backends.cudnn.benchmark = True
         return device
     try:
-        # Check if running on Google Cloud TPU via PyTorch XLA
-        import torch_xla.core.xla_model as xm
-        device = xm.xla_device()
+        import torch_xla
+        device = torch_xla.device()
         print("TPU accelerator detected via PyTorch XLA.")
         return device
-    except ImportError:
-        pass
+    except (ImportError, AttributeError):
+        try:
+            import torch_xla.core.xla_model as xm
+            device = xm.xla_device()
+            print("TPU accelerator detected via PyTorch XLA.")
+            return device
+        except ImportError:
+            pass
     return torch.device("cpu")
 
 def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_context=5, save_path_wh="bdh_mappo_wh.pt", save_path_ret="bdh_mappo_ret.pt"):
@@ -50,8 +55,8 @@ def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_conte
     model_wh = BDH_GPU(obs_dim=wh_obs_dim, act_dim=1, D=32, H=2, N=256, L=2).to(device)
     model_ret = BDH_GPU(obs_dim=max_ret_obs_dim, act_dim=1, D=32, H=2, N=256, L=2).to(device)
     
-    # PyTorch 2.0+ Model Compilation for speedups (skip if on CPU or Windows CPU to avoid overhead)
-    if hasattr(torch, "compile") and device.type in ["cuda", "xla"]:
+    # PyTorch 2.0+ Model Compilation for speedups (skip if on CPU or TPU to avoid Inductor exceptions)
+    if hasattr(torch, "compile") and device.type == "cuda":
         try:
             print("Compiling models for speed optimization...")
             model_wh = torch.compile(model_wh)
