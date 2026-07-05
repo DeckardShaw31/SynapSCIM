@@ -3,14 +3,20 @@ import numpy as np
 import os
 import csv
 import argparse
+import time
+import datetime
 import matplotlib.pyplot as plt
 from env import MultiEchelonSupplyChainEnv
 from bdh import BDH_GPU
 from ppo import PPOAgent, RolloutBuffer, get_history
 from willems_loader import get_willems_config
 
-def get_device():
-    """Detects the fastest available hardware accelerator (Intel XPU, CUDA, TPU, or CPU)."""
+def get_device(device_arg="auto"):
+    """Detects the fastest available hardware accelerator or uses the user-specified one."""
+    if device_arg != "auto":
+        print(f"Explicitly selecting user-specified device: {device_arg}")
+        return torch.device(device_arg)
+        
     # 1. Check Intel GPU (XPU)
     try:
         import intel_extension_for_pytorch as ipex
@@ -48,7 +54,7 @@ def get_device():
             pass
     return torch.device("cpu")
 
-def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_context=10, save_path="bdh_ppo_model_3000.pt"):
+def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_context=10, save_path="bdh_ppo_model_3000.pt", device_arg="auto"):
     print(f"Initializing SynapSCIM training on Willems Network {network_id}...")
     
     # 1. Load config and initialize environment
@@ -62,7 +68,7 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
     print(f"Action space dimension: {act_dim}")
     
     # 2. Instantiate policy model (custom scaled-down BDH-GPU)
-    device = get_device()
+    device = get_device(device_arg)
     print(f"Using device: {device}")
     model = BDH_GPU(
         obs_dim=obs_dim,
@@ -111,6 +117,8 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
     }
     
     print("Starting rollout loop...")
+    start_time = time.time()
+    
     for iteration in range(1, total_iterations + 1):
         buffer.clear()
         
@@ -187,12 +195,21 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
         
         # Logging progress
         mean_reward = np.mean(episode_rewards[-20:]) if len(episode_rewards) > 0 else 0.0
+        
+        # Compute ETA
+        elapsed_time = time.time() - start_time
+        avg_time_per_iter = elapsed_time / iteration
+        remaining_iters = total_iterations - iteration
+        eta_seconds = int(avg_time_per_iter * remaining_iters)
+        eta_str = str(datetime.timedelta(seconds=eta_seconds))
+        
         print(f"Iteration {iteration:04d}/{total_iterations} | "
               f"Mean Reward (last 20 ep): {mean_reward:8.2f} | "
               f"Fill Rate: {fill_rate:6.2f}% | "
               f"Actor Loss: {update_info['actor_loss']:6.4f} | "
               f"Critic Loss: {update_info['critic_loss']:6.2f} | "
-              f"Entropy: {update_info['entropy']:5.3f}")
+              f"Entropy: {update_info['entropy']:5.3f} | "
+              f"ETA: {eta_str}")
               
         # Save to metrics history dict
         metrics_history["iteration"].append(iteration)
@@ -276,11 +293,13 @@ if __name__ == "__main__":
     parser.add_argument("--total_iterations", type=int, default=3000, help="Number of training iterations.")
     parser.add_argument("--rollout_steps", type=int, default=4000, help="Steps collected per iteration.")
     parser.add_argument("--save_path", type=str, default="bdh_ppo_model_3000.pt", help="Filepath to save final model weights.")
+    parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda", "xpu", "xla"], help="Specify hardware device.")
     args = parser.parse_args()
     
     train_synapscim(
         network_id=args.network_id,
         total_iterations=args.total_iterations,
         rollout_steps=args.rollout_steps,
-        save_path=args.save_path
+        save_path=args.save_path,
+        device_arg=args.device
     )

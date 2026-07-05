@@ -3,6 +3,8 @@ import numpy as np
 import os
 import csv
 import argparse
+import time
+import datetime
 import matplotlib.pyplot as plt
 from env import MultiEchelonSupplyChainEnv
 from bdh import BDH_GPU
@@ -15,8 +17,12 @@ def pad_obs(obs, target_dim):
         return np.pad(obs, (0, target_dim - len(obs)), mode='constant')
     return obs[:target_dim]
 
-def get_device():
-    """Detects the fastest available hardware accelerator (Intel XPU, CUDA, TPU, or CPU)."""
+def get_device(device_arg="auto"):
+    """Detects the fastest available hardware accelerator or uses the user-specified one."""
+    if device_arg != "auto":
+        print(f"Explicitly selecting user-specified device: {device_arg}")
+        return torch.device(device_arg)
+        
     # 1. Check Intel GPU (XPU)
     try:
         import intel_extension_for_pytorch as ipex
@@ -54,7 +60,7 @@ def get_device():
             pass
     return torch.device("cpu")
 
-def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_context=5, save_path_wh="bdh_mappo_wh.pt", save_path_ret="bdh_mappo_ret.pt"):
+def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_context=5, save_path_wh="bdh_mappo_wh.pt", save_path_ret="bdh_mappo_ret.pt", device_arg="auto"):
     print(f"Initializing Decentralized MAPPO training on Willems Network {network_id}...")
     
     # 1. Load config and initialize multi-agent environment
@@ -68,7 +74,7 @@ def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_conte
     print(f"Retailer max obs dim: {max_ret_obs_dim}")
     
     # 2. Instantiate networks on the fastest available device
-    device = get_device()
+    device = get_device(device_arg)
     print(f"Using device: {device}")
     model_wh = BDH_GPU(obs_dim=wh_obs_dim, act_dim=1, D=32, H=2, N=256, L=2).to(device)
     model_ret = BDH_GPU(obs_dim=max_ret_obs_dim, act_dim=1, D=32, H=2, N=256, L=2).to(device)
@@ -114,6 +120,8 @@ def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_conte
     current_step = 0
     
     print("Starting rollout loop...")
+    start_time = time.time()
+    
     for iteration in range(1, total_iterations + 1):
         buffer_wh.clear()
         buffer_ret.clear()
@@ -239,12 +247,20 @@ def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_conte
         fill_rate = max(0.0, 100.0 * (1.0 - (rollout_unfilled_demand / (rollout_total_demand + 1e-8))))
         mean_reward = np.mean(buffer_wh.rewards)
         
+        # Compute ETA
+        elapsed_time = time.time() - start_time
+        avg_time_per_iter = elapsed_time / iteration
+        remaining_iters = total_iterations - iteration
+        eta_seconds = int(avg_time_per_iter * remaining_iters)
+        eta_str = str(datetime.timedelta(seconds=eta_seconds))
+        
         # Logging progress
         print(f"Iteration {iteration:04d}/{total_iterations} | "
               f"Joint Reward: {mean_reward:8.4f} | "
               f"Fill Rate: {fill_rate:6.2f}% | "
               f"WH Actor Loss: {update_info['wh_actor_loss']:6.4f} | "
-              f"Ret Actor Loss: {update_info['ret_actor_loss']:6.4f}")
+              f"Ret Actor Loss: {update_info['ret_actor_loss']:6.4f} | "
+              f"ETA: {eta_str}")
               
         # Save metrics history
         metrics_history["iteration"].append(iteration)
@@ -336,6 +352,7 @@ if __name__ == "__main__":
     parser.add_argument("--rollout_steps", type=int, default=2000, help="Steps collected per iteration.")
     parser.add_argument("--save_path_wh", type=str, default="bdh_mappo_wh.pt", help="Filepath to save warehouse model.")
     parser.add_argument("--save_path_ret", type=str, default="bdh_mappo_ret.pt", help="Filepath to save retailer model.")
+    parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda", "xpu", "xla"], help="Specify hardware device.")
     args = parser.parse_args()
     
     train_mappo(
@@ -343,5 +360,6 @@ if __name__ == "__main__":
         total_iterations=args.total_iterations,
         rollout_steps=args.rollout_steps,
         save_path_wh=args.save_path_wh,
-        save_path_ret=args.save_path_ret
+        save_path_ret=args.save_path_ret,
+        device_arg=args.device
     )
