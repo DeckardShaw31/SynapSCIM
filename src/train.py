@@ -10,11 +10,29 @@ from ppo import PPOAgent, RolloutBuffer, get_history
 from willems_loader import get_willems_config
 
 def get_device():
-    """Detects the fastest available hardware accelerator (TPU, GPU, or CPU)."""
+    """Detects the fastest available hardware accelerator (Intel XPU, CUDA, TPU, or CPU)."""
+    # 1. Check Intel GPU (XPU)
+    try:
+        import intel_extension_for_pytorch as ipex
+        if torch.xpu.is_available():
+            device = torch.device("xpu")
+            print("Intel GPU (XPU) detected via Intel Extension for PyTorch.")
+            return device
+    except ImportError:
+        pass
+        
+    if hasattr(torch, "xpu") and torch.xpu.is_available():
+        device = torch.device("xpu")
+        print("Intel GPU (XPU) detected.")
+        return device
+
+    # 2. Check NVIDIA GPU (CUDA)
     if torch.cuda.is_available():
         device = torch.device("cuda")
         torch.backends.cudnn.benchmark = True
         return device
+        
+    # 3. Check TPU (PyTorch XLA)
     try:
         import torch_xla
         device = torch_xla.device()
