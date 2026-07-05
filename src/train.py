@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import os
 import csv
+import argparse
 import matplotlib.pyplot as plt
 from env import MultiEchelonSupplyChainEnv
 from bdh import BDH_GPU
@@ -22,7 +23,6 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
     print(f"Action space dimension: {act_dim}")
     
     # 2. Instantiate policy model (custom scaled-down BDH-GPU)
-    # Using small parameters for efficient RL training
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     model = BDH_GPU(
@@ -52,19 +52,24 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
     log_csv_path = "reports/centralized_ppo/training_log.csv"
     with open(log_csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["iteration", "mean_reward", "actor_loss", "critic_loss", "entropy"])
+        writer.writerow(["iteration", "mean_reward", "actor_loss", "critic_loss", "entropy", "fill_rate"])
         
     metrics_history = {
         "iteration": [],
         "mean_reward": [],
         "actor_loss": [],
         "critic_loss": [],
-        "entropy": []
+        "entropy": [],
+        "fill_rate": []
     }
     
     print("Starting rollout loop...")
     for iteration in range(1, total_iterations + 1):
         buffer.clear()
+        
+        # Track total demand and unfilled demand for Type II Service Level (Fill Rate) during rollouts
+        rollout_total_demand = 0.0
+        rollout_unfilled_demand = 0.0
         
         # Collect rollout steps
         for _ in range(rollout_steps):
@@ -91,6 +96,12 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
             # Step the environment
             next_obs, reward, terminated, truncated, info = env.step(action_clipped)
             current_episode_reward += reward
+            
+            # Track demands and backorders for Fill Rate calculation
+            demands = info["demands"]
+            backorders = env.ret_backorders
+            rollout_total_demand += np.sum(demands)
+            rollout_unfilled_demand += np.sum(np.minimum(demands, backorders))
             
             # Store transition in buffer (storing unclipped actions)
             buffer.hist_states.append(hist_obs)
@@ -124,10 +135,14 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
         # Run PPO update epochs
         update_info = ppo_agent.update(buffer, batch_size=128, epochs=4)
         
+        # Compute rollouts Fill Rate (Type II Service Level)
+        fill_rate = max(0.0, 100.0 * (1.0 - (rollout_unfilled_demand / (rollout_total_demand + 1e-8))))
+        
         # Logging progress
         mean_reward = np.mean(episode_rewards[-20:]) if len(episode_rewards) > 0 else 0.0
-        print(f"Iteration {iteration:03d}/{total_iterations} | "
+        print(f"Iteration {iteration:04d}/{total_iterations} | "
               f"Mean Reward (last 20 ep): {mean_reward:8.2f} | "
+              f"Fill Rate: {fill_rate:6.2f}% | "
               f"Actor Loss: {update_info['actor_loss']:6.4f} | "
               f"Critic Loss: {update_info['critic_loss']:6.2f} | "
               f"Entropy: {update_info['entropy']:5.3f}")
@@ -138,19 +153,26 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
         metrics_history["actor_loss"].append(update_info["actor_loss"])
         metrics_history["critic_loss"].append(update_info["critic_loss"])
         metrics_history["entropy"].append(update_info["entropy"])
+        metrics_history["fill_rate"].append(fill_rate)
         
         # Append to CSV log file
         with open(log_csv_path, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow([iteration, mean_reward, update_info["actor_loss"], update_info["critic_loss"], update_info["entropy"]])
+            writer.writerow([iteration, mean_reward, update_info["actor_loss"], update_info["critic_loss"], update_info["entropy"], fill_rate])
+            
+        # Save model checkpoints at specific milestones
+        if iteration in [10000, 15000, 20000]:
+            checkpoint_path = f"bdh_ppo_model_{iteration}.pt"
+            torch.save(model.state_dict(), checkpoint_path)
+            print(f"Model checkpoint saved to {checkpoint_path}")
         
-    # Save the trained model
+    # Save the final trained model
     torch.save(model.state_dict(), save_path)
     print(f"Model successfully saved to {save_path}")
     
     # Generate and save training progress plot
     print("Generating training progress plot...")
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    fig, axes = plt.subplots(3, 2, figsize=(12, 14))
     
     # Plot Mean Reward
     axes[0, 0].plot(metrics_history["iteration"], metrics_history["mean_reward"], color="#1f77b4", linewidth=2)
@@ -159,26 +181,36 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
     axes[0, 0].set_ylabel("Reward (negative cost)", fontsize=10)
     axes[0, 0].grid(True, linestyle="--", alpha=0.6)
     
-    # Plot Critic Loss
-    axes[0, 1].plot(metrics_history["iteration"], metrics_history["critic_loss"], color="#ff7f0e", linewidth=2)
-    axes[0, 1].set_title("Critic Value Loss (MSE)", fontsize=12, fontweight='bold')
+    # Plot Fill Rate (Service Level)
+    axes[0, 1].plot(metrics_history["iteration"], metrics_history["fill_rate"], color="#2ca02c", linewidth=2)
+    axes[0, 1].set_title("Type II Service Level (Fill Rate %)", fontsize=12, fontweight='bold')
     axes[0, 1].set_xlabel("Iteration", fontsize=10)
-    axes[0, 1].set_ylabel("Loss Value", fontsize=10)
+    axes[0, 1].set_ylabel("Fill Rate (%)", fontsize=10)
     axes[0, 1].grid(True, linestyle="--", alpha=0.6)
     
-    # Plot Actor Loss
-    axes[1, 0].plot(metrics_history["iteration"], metrics_history["actor_loss"], color="#2ca02c", linewidth=2)
-    axes[1, 0].set_title("Actor Policy Loss", fontsize=12, fontweight='bold')
+    # Plot Critic Loss
+    axes[1, 0].plot(metrics_history["iteration"], metrics_history["critic_loss"], color="#ff7f0e", linewidth=2)
+    axes[1, 0].set_title("Critic Value Loss (MSE)", fontsize=12, fontweight='bold')
     axes[1, 0].set_xlabel("Iteration", fontsize=10)
     axes[1, 0].set_ylabel("Loss Value", fontsize=10)
     axes[1, 0].grid(True, linestyle="--", alpha=0.6)
     
-    # Plot Entropy
-    axes[1, 1].plot(metrics_history["iteration"], metrics_history["entropy"], color="#d62728", linewidth=2)
-    axes[1, 1].set_title("Policy Entropy", fontsize=12, fontweight='bold')
+    # Plot Actor Loss
+    axes[1, 1].plot(metrics_history["iteration"], metrics_history["actor_loss"], color="#d62728", linewidth=2)
+    axes[1, 1].set_title("Actor Policy Loss", fontsize=12, fontweight='bold')
     axes[1, 1].set_xlabel("Iteration", fontsize=10)
-    axes[1, 1].set_ylabel("Entropy Value", fontsize=10)
+    axes[1, 1].set_ylabel("Loss Value", fontsize=10)
     axes[1, 1].grid(True, linestyle="--", alpha=0.6)
+    
+    # Plot Entropy
+    axes[2, 0].plot(metrics_history["iteration"], metrics_history["entropy"], color="#9467bd", linewidth=2)
+    axes[2, 0].set_title("Policy Entropy", fontsize=12, fontweight='bold')
+    axes[2, 0].set_xlabel("Iteration", fontsize=10)
+    axes[2, 0].set_ylabel("Entropy Value", fontsize=10)
+    axes[2, 0].grid(True, linestyle="--", alpha=0.6)
+    
+    # Disable the 6th axis panel
+    axes[2, 1].axis("off")
     
     plt.tight_layout()
     plot_path = "reports/centralized_ppo/training_progress.png"
@@ -189,4 +221,16 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
     return model
 
 if __name__ == "__main__":
-    train_synapscim(network_id=1, total_iterations=3000)
+    parser = argparse.ArgumentParser(description="Train centralized BDH-PPO supply chain controller.")
+    parser.add_argument("--network_id", type=int, default=1, help="Willems network ID.")
+    parser.add_argument("--total_iterations", type=int, default=3000, help="Number of training iterations.")
+    parser.add_argument("--rollout_steps", type=int, default=4000, help="Steps collected per iteration.")
+    parser.add_argument("--save_path", type=str, default="bdh_ppo_model_3000.pt", help="Filepath to save final model weights.")
+    args = parser.parse_args()
+    
+    train_synapscim(
+        network_id=args.network_id,
+        total_iterations=args.total_iterations,
+        rollout_steps=args.rollout_steps,
+        save_path=args.save_path
+    )
