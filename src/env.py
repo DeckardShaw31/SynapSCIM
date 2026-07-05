@@ -21,6 +21,7 @@ class MultiEchelonSupplyChainEnv(gym.Env):
             
         self.mode = mode
         self.num_retailers = config.get("num_retailers", 3)
+        self.shared_visibility = config.get("shared_visibility", True)  # Shared factory stock level visibility to improve coordination
         self.lead_times = config.get("lead_times", [2, 3, 4])  # Lead times for shipments to retailers
         self.lead_time_prod = config.get("lead_time_prod", 1)  # Production lead time
         
@@ -102,7 +103,8 @@ class MultiEchelonSupplyChainEnv(gym.Env):
             )
             # Retailer observations: local stock, local backorder, local shipment pipeline, local demand history
             for i in range(self.num_retailers):
-                ret_obs_dim = 1 + 1 + self.lead_times[i] + self.hist_len
+                extra = 1 if self.shared_visibility else 0
+                ret_obs_dim = 1 + 1 + extra + self.lead_times[i] + self.hist_len
                 self.observation_spaces[f"retailer_{i}"] = spaces.Box(
                     low=0.0, high=np.inf, shape=(ret_obs_dim,), dtype=np.float32
                 )
@@ -178,12 +180,17 @@ class MultiEchelonSupplyChainEnv(gym.Env):
         
         # 2. Retailer observations (POMDP local state)
         for i in range(self.num_retailers):
-            ret_obs = np.concatenate([
+            parts = [
                 np.array([self.ret_stocks[i]], dtype=np.float32),
                 np.array([self.ret_backorders[i]], dtype=np.float32),
+            ]
+            if self.shared_visibility:
+                parts.append(np.array([self.wh_stock], dtype=np.float32))
+            parts.extend([
                 np.array(self.ship_pipelines[i], dtype=np.float32),
                 self.demand_history[i]
             ])
+            ret_obs = np.concatenate(parts)
             obs_dict[f"retailer_{i}"] = ret_obs
             
         return obs_dict

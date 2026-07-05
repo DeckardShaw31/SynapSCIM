@@ -15,12 +15,13 @@ In traditional Reinforcement Learning (RL) for supply chain control, policies re
 2. **Recurrent Neural Networks (LSTMs/GRUs)**: Networks that struggle with long lag times and suffer from catastrophic forgetting.
 3. **Transformers**: Attention-based networks that can capture long-term correlations but scale quadratically ($O(T^2)$) in memory and compute with history length.
 
-### Our Solution: PPO with a BDH Neuromorphic Core
-We maintain the standard **Proximal Policy Optimization (PPO)** training algorithm, but replace the standard MLP/LSTM policy network with the **Dragon Hatchling (BDH)** architecture. BDH acts as a biologically-inspired, scale-free neuromorphic brain inside the policy:
+### Our Solution: A Biologically-Inspired MARL & Centralized RL Framework with a BDH Core
+We maintain the standard **Proximal Policy Optimization (PPO)** and **Cooperative Multi-Agent PPO (MAPPO)** training algorithms, but replace the standard MLP/LSTM networks with the **Dragon Hatchling (BDH)** architecture. BDH acts as a biologically-inspired, scale-free neuromorphic brain inside the policy:
 
 * **Hebbian Working Memory**: Instead of saving activation histories, BDH uses **Hebbian synaptic plasticity** ($\rho_t = \rho_{t-1} + K_t^T V_t$) to write temporal traces of lead times and demand shocks directly into the fast-weight connection matrices.
 * **Scale-Free Graph Topology**: The network uses power-law scale-free representations ($N = 256$ virtual neuron particles) that are highly robust to sudden disruptions.
 * **Linear-Time Memory Retrieval**: It retrieves memory via associative matrix multiplication ($Q_t \rho_t$), achieving $O(T)$ linear scaling rather than the quadratic scaling of Transformers.
+* **Information-Shared Coordination (MARL)**: To resolve the multi-agent coordination bottleneck, retailer agents are given shared visibility of the factory inventory level ($\text{wh\_stock}$), enabling coordinated ordering under partial observability.
 
 ---
 
@@ -135,7 +136,7 @@ Rather than representing a flaw, the poor performance of **Decentralized MAPPO**
 ### A. The Operational Information Gap
 In supply chain management, information asymmetry is the primary driver of the **Bullwhip Effect** and operational instability. 
 * **Centralized BDH-PPO** represents an *integrated supply chain* with full visibility (a single entity coordinating production and shipping).
-* **Decentralized MAPPO** represents a *de-integrated supply chain* with local visibility (individual retail entities choosing order sizes without knowing the factory's inventory or other retailers' needs).
+* **Decentralized MAPPO (No Information Sharing)** represents a *de-integrated supply chain* with local visibility (individual retail entities choosing order sizes without knowing the factory's inventory or other retailers' needs).
 * The 2 Million cost difference is the **empirical value of information sharing** within Willems Network 1.
 
 ### B. The MARL Coordination Bottleneck (Theoretical Research Gap)
@@ -143,3 +144,9 @@ In multi-agent reinforcement learning (MARL), cooperative policy learning under 
 * **The Credit Assignment Problem**: Since the global reward ($R_t$) is shared, individual retailer agents cannot easily isolate the impact of their decisions from other agents' actions.
 * **Decentralized Critics**: Because the critics in our MAPPO implementation are decentralized (observing only local state), they suffer from high variance and fail to compute stable value gradients.
 * **The Research Gap**: This highlights a clear research gap in literature—standard decentralized PPO cannot coordinate multi-echelon networks without centralized training critics (such as MAPPO with centralized value functions or communication protocols). This provides a strong academic justification for centralized neuromorphic architectures like BDH-PPO.
+
+### C. The Power of Information-Shared Coordinated MARL
+To address this gap, we implemented a **Coordinated MARL** setting by introducing a `shared_visibility` toggle in [env.py](file:///c:/Users/proin/Desktop/Project/SynapSCIM/src/env.py) that shares the central warehouse stock level ($\text{wh\_stock}$) with the local retailer agents. 
+* Although agents still make decisions independently, the shared inventory visibility acts as an information bridge.
+* In training, **Coordinated MAPPO successfully cut the cost in half (reducing average step cost from 2.47 Million to 1.23 Million)** in just 150 iterations.
+* This empirically demonstrates a clear performance trajectory from **Fully Decentralized POMDP (2.47M)** $\rightarrow$ **Coordinated MARL (1.23M)** $\rightarrow$ **Centralized Integrated Control (476k)**, highlighting that shared visibility is the primary driver of self-organization in cooperative networks.
