@@ -12,7 +12,10 @@ def get_willems_config(network_id=1, max_retailers_limit=5):
         network_id (int): Network ID from 1 to 38.
         max_retailers_limit (int): Limit the action space size for RL by selecting the top-k retailers by demand.
     """
-    excel_path = os.path.join("data", "msom-willems.xls")
+    # Resolve path relative to the willems_loader.py file location (project root)
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    project_dir = os.path.dirname(base_dir)
+    excel_path = os.path.join(project_dir, "data", "msom-willems.xls")
     
     if os.path.exists(excel_path):
         try:
