@@ -9,6 +9,21 @@ from bdh import BDH_GPU
 from ppo import PPOAgent, RolloutBuffer, get_history
 from willems_loader import get_willems_config
 
+def get_device():
+    """Detects the fastest available hardware accelerator (TPU, GPU, or CPU)."""
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        torch.backends.cudnn.benchmark = True
+        return device
+    try:
+        import torch_xla.core.xla_model as xm
+        device = xm.xla_device()
+        print("TPU accelerator detected via PyTorch XLA.")
+        return device
+    except ImportError:
+        pass
+    return torch.device("cpu")
+
 def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_context=10, save_path="bdh_ppo_model_3000.pt"):
     print(f"Initializing SynapSCIM training on Willems Network {network_id}...")
     
@@ -23,7 +38,7 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
     print(f"Action space dimension: {act_dim}")
     
     # 2. Instantiate policy model (custom scaled-down BDH-GPU)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = get_device()
     print(f"Using device: {device}")
     model = BDH_GPU(
         obs_dim=obs_dim,
@@ -35,6 +50,14 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
         dropout=0.05
     ).to(device)
     
+    # PyTorch 2.0+ Model Compilation for speedups (skip if on CPU or Windows CPU to avoid overhead)
+    if hasattr(torch, "compile") and device.type in ["cuda", "xla"]:
+        try:
+            print("Compiling model for speed optimization...")
+            model = torch.compile(model)
+        except Exception as e:
+            print(f"Skipping model compilation: {e}")
+            
     # 3. Instantiate PPO agent and Rollout buffer
     ppo_agent = PPOAgent(model, lr=1e-4)
     buffer = RolloutBuffer()
@@ -77,8 +100,8 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
             t = len(episode_obs) - 1
             hist_obs = get_history(episode_obs, t, T_context)
             
-            # Convert to PyTorch tensor and run forward pass
-            hist_obs_t = torch.tensor(hist_obs, dtype=torch.float32).unsqueeze(0).to(device)  # Add batch dim: [1, T_context, obs_dim]
+            # Convert to PyTorch tensor and run forward pass (using as_tensor for performance)
+            hist_obs_t = torch.as_tensor(hist_obs, dtype=torch.float32, device=device).unsqueeze(0)
             
             with torch.no_grad():
                 action_mu, action_std, state_value = model(hist_obs_t)
@@ -125,7 +148,7 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
         # Get value for the final step to compute GAE bootstrapping
         last_t = len(episode_obs) - 1
         last_hist = get_history(episode_obs, last_t, T_context)
-        last_hist_t = torch.tensor(last_hist, dtype=torch.float32).unsqueeze(0).to(device)
+        last_hist_t = torch.as_tensor(last_hist, dtype=torch.float32, device=device).unsqueeze(0)
         with torch.no_grad():
             _, _, final_value = model(last_hist_t)
             
@@ -162,12 +185,15 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
             
         # Save model checkpoints at specific milestones
         if iteration in [10000, 15000, 20000]:
+            # Unwrap compiled model state dict if compiled
+            state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
             checkpoint_path = f"bdh_ppo_model_{iteration}.pt"
-            torch.save(model.state_dict(), checkpoint_path)
+            torch.save(state, checkpoint_path)
             print(f"Model checkpoint saved to {checkpoint_path}")
         
     # Save the final trained model
-    torch.save(model.state_dict(), save_path)
+    state_final = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+    torch.save(state_final, save_path)
     print(f"Model successfully saved to {save_path}")
     
     # Generate and save training progress plot

@@ -15,6 +15,22 @@ def pad_obs(obs, target_dim):
         return np.pad(obs, (0, target_dim - len(obs)), mode='constant')
     return obs[:target_dim]
 
+def get_device():
+    """Detects the fastest available hardware accelerator (TPU, GPU, or CPU)."""
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        torch.backends.cudnn.benchmark = True
+        return device
+    try:
+        # Check if running on Google Cloud TPU via PyTorch XLA
+        import torch_xla.core.xla_model as xm
+        device = xm.xla_device()
+        print("TPU accelerator detected via PyTorch XLA.")
+        return device
+    except ImportError:
+        pass
+    return torch.device("cpu")
+
 def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_context=5, save_path_wh="bdh_mappo_wh.pt", save_path_ret="bdh_mappo_ret.pt"):
     print(f"Initializing Decentralized MAPPO training on Willems Network {network_id}...")
     
@@ -28,12 +44,21 @@ def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_conte
     print(f"Warehouse obs dim: {wh_obs_dim}")
     print(f"Retailer max obs dim: {max_ret_obs_dim}")
     
-    # 2. Instantiate networks
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # 2. Instantiate networks on the fastest available device
+    device = get_device()
     print(f"Using device: {device}")
     model_wh = BDH_GPU(obs_dim=wh_obs_dim, act_dim=1, D=32, H=2, N=256, L=2).to(device)
     model_ret = BDH_GPU(obs_dim=max_ret_obs_dim, act_dim=1, D=32, H=2, N=256, L=2).to(device)
     
+    # PyTorch 2.0+ Model Compilation for speedups (skip if on CPU or Windows CPU to avoid overhead)
+    if hasattr(torch, "compile") and device.type in ["cuda", "xla"]:
+        try:
+            print("Compiling models for speed optimization...")
+            model_wh = torch.compile(model_wh)
+            model_ret = torch.compile(model_ret)
+        except Exception as e:
+            print(f"Skipping model compilation: {e}")
+            
     mappo_agent = MultiAgentPPOAgent(model_wh, model_ret, lr=1e-4)
     buffer_wh = RolloutBuffer()
     buffer_ret = RolloutBuffer()
@@ -58,7 +83,7 @@ def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_conte
     # 4. Rollout parameter initializations
     obs_dict, _ = env.reset(seed=42)
     hidden_wh = model_wh.init_recurrent_states(1, device)
-    hidden_rets = [model_ret.init_recurrent_states(1, device) for _ in range(env.num_retailers)]
+    hidden_rets = model_ret.init_recurrent_states(env.num_retailers, device)
     
     wh_history = [obs_dict["warehouse"]]
     ret_histories = [[pad_obs(obs_dict[f"retailer_{i}"], max_ret_obs_dim)] for i in range(env.num_retailers)]
@@ -76,7 +101,7 @@ def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_conte
         # Collect rollout steps
         for _ in range(rollout_steps):
             # Warehouse forward recurrent pass
-            obs_wh_t = torch.tensor(obs_dict["warehouse"], dtype=torch.float32).unsqueeze(0).to(device)
+            obs_wh_t = torch.as_tensor(obs_dict["warehouse"], dtype=torch.float32, device=device).unsqueeze(0)
             with torch.no_grad():
                 mu_wh, std_wh, val_wh, next_hidden_wh = model_wh.forward_recurrent(obs_wh_t, current_step, hidden_wh)
                 
@@ -86,31 +111,39 @@ def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_conte
             action_wh_unclipped = act_wh_t.cpu().numpy()[0]
             action_wh_clipped = np.clip(action_wh_unclipped, 0.0, 1.0)
             
-            # Retailers forward recurrent pass
+            # Retailers BATCH forward pass (inferences run in parallel on GPU/TPU)
             action_dict = {"warehouse": action_wh_clipped}
             retailer_vals = []
             retailer_log_probs = []
             retailer_actions_unclipped = []
-            next_hidden_rets = []
             
+            ret_obs_list = []
             for i in range(env.num_retailers):
                 padded = pad_obs(obs_dict[f"retailer_{i}"], max_ret_obs_dim)
-                obs_ret_t = torch.tensor(padded, dtype=torch.float32).unsqueeze(0).to(device)
+                ret_obs_list.append(padded)
+            
+            # Pack all retailers' observations into a single batch
+            obs_ret_batch = torch.as_tensor(np.array(ret_obs_list), dtype=torch.float32, device=device)
+            
+            with torch.no_grad():
+                mu_ret, std_ret, val_ret, next_hidden_rets = model_ret.forward_recurrent(obs_ret_batch, current_step, hidden_rets)
                 
-                with torch.no_grad():
-                    mu_ret, std_ret, val_ret, next_hidden_ret = model_ret.forward_recurrent(obs_ret_t, current_step, hidden_rets[i])
-                    
-                dist_ret = torch.distributions.Normal(mu_ret, std_ret)
-                act_ret_t = dist_ret.sample()
-                log_prob_ret = dist_ret.log_prob(act_ret_t).sum(dim=-1).item()
-                action_ret_unclipped = act_ret_t.cpu().numpy()[0]
+            dist_ret = torch.distributions.Normal(mu_ret, std_ret)
+            act_ret_batch = dist_ret.sample()
+            log_prob_ret_batch = dist_ret.log_prob(act_ret_batch).sum(dim=-1)
+            
+            act_ret_np = act_ret_batch.cpu().numpy()
+            log_prob_ret_np = log_prob_ret_batch.cpu().numpy()
+            val_ret_np = val_ret.cpu().numpy()
+            
+            for i in range(env.num_retailers):
+                action_ret_unclipped = act_ret_np[i]
                 action_ret_clipped = np.clip(action_ret_unclipped, 0.0, 1.0)
-                
                 action_dict[f"retailer_{i}"] = action_ret_clipped
-                retailer_vals.append(val_ret.item())
-                retailer_log_probs.append(log_prob_ret)
+                
                 retailer_actions_unclipped.append(action_ret_unclipped)
-                next_hidden_rets.append(next_hidden_ret)
+                retailer_log_probs.append(log_prob_ret_np[i])
+                retailer_vals.append(val_ret_np[i][0])
                 
             # Step Multi-Agent Environment
             next_obs_dict, rewards_dict, terminations_dict, truncations_dict, infos_dict = env.step(action_dict)
@@ -154,25 +187,26 @@ def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_conte
             if terminations_dict["warehouse"] or truncations_dict["warehouse"]:
                 obs_dict, _ = env.reset()
                 hidden_wh = model_wh.init_recurrent_states(1, device)
-                hidden_rets = [model_ret.init_recurrent_states(1, device) for _ in range(env.num_retailers)]
+                hidden_rets = model_ret.init_recurrent_states(env.num_retailers, device)
                 wh_history = [obs_dict["warehouse"]]
                 ret_histories = [[pad_obs(obs_dict[f"retailer_{i}"], max_ret_obs_dim)] for i in range(env.num_retailers)]
                 current_step = 0
                 
         # Compute GAE for Warehouse
-        obs_wh_last = torch.tensor(obs_dict["warehouse"], dtype=torch.float32).unsqueeze(0).to(device)
+        obs_wh_last = torch.as_tensor(obs_dict["warehouse"], dtype=torch.float32, device=device).unsqueeze(0)
         with torch.no_grad():
             _, _, final_val_wh, _ = model_wh.forward_recurrent(obs_wh_last, current_step, hidden_wh)
         buffer_wh.compute_gae(final_val_wh.item())
         
-        # Compute GAE for Retailers
-        final_val_rets = []
+        # Compute GAE for Retailers in batch
+        ret_obs_last_list = []
         for i in range(env.num_retailers):
             padded_last = pad_obs(obs_dict[f"retailer_{i}"], max_ret_obs_dim)
-            obs_ret_last = torch.tensor(padded_last, dtype=torch.float32).unsqueeze(0).to(device)
-            with torch.no_grad():
-                _, _, final_val_ret, _ = model_ret.forward_recurrent(obs_ret_last, current_step, hidden_rets[i])
-            final_val_rets.append(final_val_ret.item())
+            ret_obs_last_list.append(padded_last)
+        obs_ret_last_batch = torch.as_tensor(np.array(ret_obs_last_list), dtype=torch.float32, device=device)
+        with torch.no_grad():
+            _, _, final_val_rets_t, _ = model_ret.forward_recurrent(obs_ret_last_batch, current_step, hidden_rets)
+        final_val_rets = final_val_rets_t.squeeze(-1).cpu().numpy()
         buffer_ret.compute_gae(float(np.mean(final_val_rets)))
         
         # PPO Update (parallel backprop)
@@ -210,15 +244,20 @@ def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_conte
             
         # Checkpoints saving
         if iteration in [10000, 15000, 20000]:
+            # Unwrap compiled model state dicts if compiled
+            wh_state = model_wh.module.state_dict() if hasattr(model_wh, "module") else model_wh.state_dict()
+            ret_state = model_ret.module.state_dict() if hasattr(model_ret, "module") else model_ret.state_dict()
             checkpoint_wh = f"bdh_mappo_wh_{iteration}.pt"
             checkpoint_ret = f"bdh_mappo_ret_{iteration}.pt"
-            torch.save(model_wh.state_dict(), checkpoint_wh)
-            torch.save(model_ret.state_dict(), checkpoint_ret)
+            torch.save(wh_state, checkpoint_wh)
+            torch.save(ret_state, checkpoint_ret)
             print(f"MAPPO checkpoints saved at iteration {iteration}")
             
     # Save final model
-    torch.save(model_wh.state_dict(), save_path_wh)
-    torch.save(model_ret.state_dict(), save_path_ret)
+    wh_state_final = model_wh.module.state_dict() if hasattr(model_wh, "module") else model_wh.state_dict()
+    ret_state_final = model_ret.module.state_dict() if hasattr(model_ret, "module") else model_ret.state_dict()
+    torch.save(wh_state_final, save_path_wh)
+    torch.save(ret_state_final, save_path_ret)
     print(f"Final MAPPO models saved to {save_path_wh} and {save_path_ret}")
     
     # Generate and save training progress plot
