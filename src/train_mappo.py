@@ -113,12 +113,11 @@ def get_device(device_arg="auto"):
             pass
     return torch.device("cpu")
 
-def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_context=5, save_path_wh="bdh_mappo_wh.pt", save_path_ret="bdh_mappo_ret.pt", device_arg="auto", resume=False):
+def train_mappo(network_id=1, total_iterations=20000, rollout_steps=2000, T_context=5, save_path_wh="bdh_mappo_wh_20000.pt", save_path_ret="bdh_mappo_ret_20000.pt", device_arg="auto", resume=False, num_envs=64):
     print(f"Initializing Decentralized MAPPO training on Willems Network {network_id}...")
     
     # 1. Load config and initialize multi-agent environment
     config = get_willems_config(network_id)
-    num_envs = 16
     print(f"Using {num_envs} vectorized environments for parallel rollout collection.")
     envs = VectorMultiAgentEnv(lambda: MultiEchelonSupplyChainEnv(config, mode="multi_agent"), num_envs)
     
@@ -483,12 +482,13 @@ def train_mappo(network_id=1, total_iterations=1000, rollout_steps=2000, T_conte
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train decentralized MAPPO cooperative supply chain controller.")
     parser.add_argument("--network_id", type=int, default=1, help="Willems network ID.")
-    parser.add_argument("--total_iterations", type=int, default=1000, help="Number of training iterations.")
+    parser.add_argument("--total_iterations", type=int, default=20000, help="Number of training iterations.")
     parser.add_argument("--rollout_steps", type=int, default=2000, help="Steps collected per iteration.")
-    parser.add_argument("--save_path_wh", type=str, default="bdh_mappo_wh.pt", help="Filepath to save warehouse model.")
-    parser.add_argument("--save_path_ret", type=str, default="bdh_mappo_ret.pt", help="Filepath to save retailer model.")
+    parser.add_argument("--save_path_wh", type=str, default="bdh_mappo_wh_20000.pt", help="Filepath to save warehouse model.")
+    parser.add_argument("--save_path_ret", type=str, default="bdh_mappo_ret_20000.pt", help="Filepath to save retailer model.")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda", "xpu", "xla"], help="Specify hardware device.")
     parser.add_argument("--resume", action="store_true", help="Resume training from save paths checkpoints if they exist.")
+    parser.add_argument("--num_envs", type=int, default=64, help="Number of parallel environments for vectorized rollouts.")
     args = parser.parse_args()
     
     train_mappo(
@@ -498,5 +498,6 @@ if __name__ == "__main__":
         save_path_wh=args.save_path_wh,
         save_path_ret=args.save_path_ret,
         device_arg=args.device,
-        resume=args.resume
+        resume=args.resume,
+        num_envs=args.num_envs
     )

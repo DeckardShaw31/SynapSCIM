@@ -8,7 +8,7 @@ A biologically-inspired Multi-Agent Reinforcement Learning (MARL) framework util
 All scripts are located in the `src/` directory. Below are the commands to execute training, stress testing, evaluations, and real-world dataset validation.
 
 ### ⚡ Vectorized Rollout Acceleration
-Both training scripts (`train.py` and `train_mappo.py`) are fully vectorized, running **16 parallel environments in sync** to batch model inferences. This increases GPU utilization, reduces execution loop overhead, and speeds up training by 10x–20x on hardware accelerators.
+Both training scripts (`train.py` and `train_mappo.py`) are fully vectorized, running **64 parallel environments in sync** (default) to batch model inferences. This increases GPU utilization, reduces execution loop overhead, and speeds up training by 10x–20x on hardware accelerators.
 
 ---
 
@@ -18,12 +18,13 @@ To run the centralized coordinated supply chain controller:
 python src/train.py --total_iterations 20000 --save_path bdh_ppo_model_20000.pt --device cuda --resume
 ```
 * **Arguments**:
-  * `--total_iterations` (default: `3000`): Total training iterations.
+  * `--total_iterations` (default: `20000`): Total training iterations.
   * `--rollout_steps` (default: `4000`): Environment steps collected per iteration across all vectorized envs.
   * `--network_id` (default: `1`): Willems Network ID (1 to 38) to train on.
-  * `--save_path` (default: `bdh_ppo_model_3000.pt`): Weights file save destination.
+  * `--save_path` (default: `bdh_ppo_model_20000.pt`): Weights file save destination.
   * `--device` (default: `auto`, choices: `auto`, `cpu`, `cuda`, `xpu`, `xla`): Override target hardware accelerator.
   * `--resume`: Flag to automatically resume training from `save_path` and append progress to logs.
+  * `--num_envs` (default: `64`): Number of parallel environments for vectorized rollouts.
 
 ---
 
@@ -33,12 +34,13 @@ To run the standalone multi-agent training for decentralized entities under loca
 python src/train_mappo.py --total_iterations 20000 --save_path_wh bdh_mappo_wh_20000.pt --save_path_ret bdh_mappo_ret_20000.pt --device cuda --resume
 ```
 * **Arguments**:
-  * `--total_iterations` (default: `1000`): Total training iterations.
+  * `--total_iterations` (default: `20000`): Total training iterations.
   * `--rollout_steps` (default: `2000`): Steps collected per iteration.
-  * `--save_path_wh` (default: `bdh_mappo_wh.pt`): Warehouse model weights save path.
-  * `--save_path_ret` (default: `bdh_mappo_ret.pt`): Retailer model weights save path.
+  * `--save_path_wh` (default: `bdh_mappo_wh_20000.pt`): Warehouse model weights save path.
+  * `--save_path_ret` (default: `bdh_mappo_ret_20000.pt`): Retailer model weights save path.
   * `--device` (default: `auto`, choices: `auto`, `cpu`, `cuda`, `xpu`, `xla`): Override target hardware accelerator.
   * `--resume`: Flag to automatically resume training from checkpoints and append progress to logs.
+  * `--num_envs` (default: `64`): Number of parallel environments for vectorized rollouts.
 
 ---
 

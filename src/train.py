@@ -87,12 +87,11 @@ def get_device(device_arg="auto"):
             pass
     return torch.device("cpu")
 
-def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_context=10, save_path="bdh_ppo_model_3000.pt", device_arg="auto", resume=False):
+def train_synapscim(network_id=1, total_iterations=20000, rollout_steps=4000, T_context=10, save_path="bdh_ppo_model_20000.pt", device_arg="auto", resume=False, num_envs=64):
     print(f"Initializing SynapSCIM training on Willems Network {network_id}...")
     
     # 1. Load config and initialize environment
     config = get_willems_config(network_id)
-    num_envs = 16
     print(f"Using {num_envs} vectorized environments for parallel rollout collection.")
     envs = VectorSingleAgentEnv(lambda: MultiEchelonSupplyChainEnv(config), num_envs)
     
@@ -380,11 +379,12 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train centralized BDH-PPO supply chain controller.")
     parser.add_argument("--network_id", type=int, default=1, help="Willems network ID.")
-    parser.add_argument("--total_iterations", type=int, default=3000, help="Number of training iterations.")
+    parser.add_argument("--total_iterations", type=int, default=20000, help="Number of training iterations.")
     parser.add_argument("--rollout_steps", type=int, default=4000, help="Steps collected per iteration.")
-    parser.add_argument("--save_path", type=str, default="bdh_ppo_model_3000.pt", help="Filepath to save final model weights.")
+    parser.add_argument("--save_path", type=str, default="bdh_ppo_model_20000.pt", help="Filepath to save final model weights.")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda", "xpu", "xla"], help="Specify hardware device.")
     parser.add_argument("--resume", action="store_true", help="Resume training from save_path checkpoint if it exists.")
+    parser.add_argument("--num_envs", type=int, default=64, help="Number of parallel environments for vectorized rollouts.")
     args = parser.parse_args()
     
     train_synapscim(
@@ -393,5 +393,6 @@ if __name__ == "__main__":
         rollout_steps=args.rollout_steps,
         save_path=args.save_path,
         device_arg=args.device,
-        resume=args.resume
+        resume=args.resume,
+        num_envs=args.num_envs
     )
