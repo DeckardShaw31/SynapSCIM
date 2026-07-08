@@ -11,6 +11,39 @@ from bdh import BDH_GPU
 from ppo import PPOAgent, RolloutBuffer, get_history
 from willems_loader import get_willems_config
 
+class VectorSingleAgentEnv:
+    def __init__(self, make_env_fn, num_envs):
+        self.envs = [make_env_fn() for _ in range(num_envs)]
+        self.num_envs = num_envs
+        self.observation_space = self.envs[0].observation_space
+        self.action_space = self.envs[0].action_space
+        
+    def reset(self, seed=42):
+        obs_list = [self.envs[i].reset(seed=seed+i)[0] for i in range(self.num_envs)]
+        return np.stack(obs_list)
+        
+    def step(self, actions):
+        obs_list, reward_list, term_list, trunc_list, info_list = [], [], [], [], []
+        for i in range(self.num_envs):
+            obs, reward, terminated, truncated, info = self.envs[i].step(actions[i])
+            if terminated or truncated:
+                reset_obs, _ = self.envs[i].reset()
+                obs_list.append(reset_obs)
+            else:
+                obs_list.append(obs)
+            reward_list.append(reward)
+            term_list.append(terminated)
+            trunc_list.append(truncated)
+            info_list.append(info)
+            
+        return (
+            np.stack(obs_list),
+            np.array(reward_list, dtype=np.float32),
+            np.array(term_list, dtype=bool),
+            np.array(trunc_list, dtype=bool),
+            info_list
+        )
+
 def get_device(device_arg="auto"):
     """Detects the fastest available hardware accelerator or uses the user-specified one."""
     if device_arg != "auto":
@@ -54,15 +87,17 @@ def get_device(device_arg="auto"):
             pass
     return torch.device("cpu")
 
-def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_context=10, save_path="bdh_ppo_model_3000.pt", device_arg="auto"):
+def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_context=10, save_path="bdh_ppo_model_3000.pt", device_arg="auto", resume=False):
     print(f"Initializing SynapSCIM training on Willems Network {network_id}...")
     
     # 1. Load config and initialize environment
     config = get_willems_config(network_id)
-    env = MultiEchelonSupplyChainEnv(config)
+    num_envs = 16
+    print(f"Using {num_envs} vectorized environments for parallel rollout collection.")
+    envs = VectorSingleAgentEnv(lambda: MultiEchelonSupplyChainEnv(config), num_envs)
     
-    obs_dim = env.observation_space.shape[0]
-    act_dim = env.action_space.shape[0]
+    obs_dim = envs.observation_space.shape[0]
+    act_dim = envs.action_space.shape[0]
     
     print(f"Observation space dimension: {obs_dim}")
     print(f"Action space dimension: {act_dim}")
@@ -88,25 +123,38 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
         except Exception as e:
             print(f"Skipping model compilation: {e}")
             
-    # 3. Instantiate PPO agent and Rollout buffer
+    # 3. Instantiate PPO agent and buffers
     ppo_agent = PPOAgent(model, lr=1e-4)
-    buffer = RolloutBuffer()
-    
-    # 4. Rollout execution parameters
-    episode_obs = []
-    obs, _ = env.reset(seed=42)
-    episode_obs.append(obs)
-    
-    episode_rewards = []
-    current_episode_reward = 0.0
+    main_buffer = RolloutBuffer()
+    env_buffers = [RolloutBuffer() for _ in range(num_envs)]
     
     # Setup metrics logging
     os.makedirs("reports/centralized_ppo", exist_ok=True)
     log_csv_path = "reports/centralized_ppo/training_log.csv"
-    with open(log_csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["iteration", "mean_reward", "actor_loss", "critic_loss", "entropy", "fill_rate"])
-        
+    
+    # Check for resume options
+    start_iteration = 1
+    if resume and os.path.exists(save_path):
+        print(f"Resuming training from checkpoint: {save_path}")
+        try:
+            model.load_state_dict(torch.load(save_path, map_location=device))
+            if os.path.exists(log_csv_path):
+                with open(log_csv_path, "r", encoding="utf-8") as f:
+                    reader = list(csv.reader(f))
+                    if len(reader) > 1:
+                        # Find the last logged iteration
+                        start_iteration = int(reader[-1][0]) + 1
+                        print(f"Resuming from iteration {start_iteration}")
+        except Exception as e:
+            print(f"Could not load checkpoint or log files: {e}. Starting from iteration 1.")
+            start_iteration = 1
+            
+    # If not resuming or files do not exist, write CSV header
+    if start_iteration == 1:
+        with open(log_csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["iteration", "mean_reward", "actor_loss", "critic_loss", "entropy", "fill_rate"])
+            
     metrics_history = {
         "iteration": [],
         "mean_reward": [],
@@ -116,24 +164,54 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
         "fill_rate": []
     }
     
+    # Load past logs into metrics history if resuming
+    if start_iteration > 1 and os.path.exists(log_csv_path):
+        try:
+            with open(log_csv_path, "r", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                next(reader) # skip header
+                for row in reader:
+                    if len(row) >= 6:
+                        metrics_history["iteration"].append(int(row[0]))
+                        metrics_history["mean_reward"].append(float(row[1]))
+                        metrics_history["actor_loss"].append(float(row[2]))
+                        metrics_history["critic_loss"].append(float(row[3]))
+                        metrics_history["entropy"].append(float(row[4]))
+                        metrics_history["fill_rate"].append(float(row[5]))
+        except Exception as e:
+            print(f"Error loading past CSV logs: {e}")
+            
+    # 4. Rollout execution parameters
+    obs = envs.reset(seed=42)
+    episode_obs = [[obs[i]] for i in range(num_envs)]
+    current_episode_rewards = [0.0] * num_envs
+    episode_rewards = []
+    
+    steps_per_env = rollout_steps // num_envs
+    
     print("Starting rollout loop...")
     start_time = time.time()
     
-    for iteration in range(1, total_iterations + 1):
-        buffer.clear()
-        
+    for iteration in range(start_iteration, total_iterations + 1):
+        for b in env_buffers:
+            b.clear()
+            
         # Track total demand and unfilled demand for Type II Service Level (Fill Rate) during rollouts
         rollout_total_demand = 0.0
         rollout_unfilled_demand = 0.0
         
-        # Collect rollout steps
-        for _ in range(rollout_steps):
-            # Construct history segment
-            t = len(episode_obs) - 1
-            hist_obs = get_history(episode_obs, t, T_context)
+        # Collect rollout steps batched
+        for step in range(steps_per_env):
+            # Construct history segment for all envs
+            hist_obs_list = []
+            for i in range(num_envs):
+                t = len(episode_obs[i]) - 1
+                hist_obs_list.append(get_history(episode_obs[i], t, T_context))
+                
+            hist_obs_batch = np.stack(hist_obs_list)
             
-            # Convert to PyTorch tensor and run forward pass (using as_tensor for performance)
-            hist_obs_t = torch.as_tensor(hist_obs, dtype=torch.float32, device=device).unsqueeze(0)
+            # Convert to PyTorch tensor and run forward pass
+            hist_obs_t = torch.as_tensor(hist_obs_batch, dtype=torch.float32, device=device)
             
             with torch.no_grad():
                 action_mu, action_std, state_value = model(hist_obs_t)
@@ -143,52 +221,62 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
             action_t = dist.sample()
             log_prob_t = dist.log_prob(action_t).sum(dim=-1)
             
-            action_unclipped = action_t.cpu().numpy()[0]
-            action_clipped = np.clip(action_unclipped, 0.0, 1.0)
-            log_prob = log_prob_t.item()
-            val = state_value.item()
+            actions_unclipped = action_t.cpu().numpy()
+            actions_clipped = np.clip(actions_unclipped, 0.0, 1.0)
+            log_probs = log_prob_t.cpu().numpy()
+            values = state_value.cpu().numpy().squeeze(-1)
             
-            # Step the environment
-            next_obs, reward, terminated, truncated, info = env.step(action_clipped)
-            current_episode_reward += reward
+            # Step the environments in parallel
+            next_obs, rewards, terminateds, truncateds, infos = envs.step(actions_clipped)
             
-            # Track demands and backorders for Fill Rate calculation
-            demands = info["demands"]
-            backorders = env.ret_backorders
-            rollout_total_demand += np.sum(demands)
-            rollout_unfilled_demand += np.sum(np.minimum(demands, backorders))
-            
-            # Store transition in buffer (storing unclipped actions)
-            buffer.hist_states.append(hist_obs)
-            buffer.actions.append(action_unclipped)
-            buffer.log_probs.append(log_prob)
-            buffer.rewards.append(reward)
-            buffer.dones.append(terminated)
-            buffer.values.append(val)
-            
-            # Update episode observations list
-            episode_obs.append(next_obs)
-            
-            if terminated or truncated:
-                episode_rewards.append(current_episode_reward)
-                current_episode_reward = 0.0
+            for i in range(num_envs):
+                current_episode_rewards[i] += rewards[i]
                 
-                # Reset environment and episode obs history
-                obs, _ = env.reset()
-                episode_obs = [obs]
+                # Track demands and backorders for Fill Rate calculation
+                demands = infos[i]["demands"]
+                backorders = envs.envs[i].ret_backorders
+                rollout_total_demand += np.sum(demands)
+                rollout_unfilled_demand += np.sum(np.minimum(demands, backorders))
                 
-        # Get value for the final step to compute GAE bootstrapping
-        last_t = len(episode_obs) - 1
-        last_hist = get_history(episode_obs, last_t, T_context)
-        last_hist_t = torch.as_tensor(last_hist, dtype=torch.float32, device=device).unsqueeze(0)
-        with torch.no_grad():
-            _, _, final_value = model(last_hist_t)
+                # Store transition in respective env buffer
+                env_buffers[i].hist_states.append(hist_obs_batch[i])
+                env_buffers[i].actions.append(actions_unclipped[i])
+                env_buffers[i].log_probs.append(log_probs[i])
+                env_buffers[i].rewards.append(rewards[i])
+                env_buffers[i].dones.append(terminateds[i])
+                env_buffers[i].values.append(values[i])
+                
+                # Update episode observations list
+                if terminateds[i] or truncateds[i]:
+                    episode_rewards.append(current_episode_rewards[i])
+                    current_episode_rewards[i] = 0.0
+                    episode_obs[i] = [next_obs[i]]
+                else:
+                    episode_obs[i].append(next_obs[i])
+                    
+        # Compute GAE for each environment's trajectory
+        for i in range(num_envs):
+            last_t = len(episode_obs[i]) - 1
+            last_hist = get_history(episode_obs[i], last_t, T_context)
+            last_hist_t = torch.as_tensor(last_hist, dtype=torch.float32, device=device).unsqueeze(0)
+            with torch.no_grad():
+                _, _, final_value = model(last_hist_t)
+            env_buffers[i].compute_gae(final_value.item())
             
-        # Compute Generalized Advantage Estimation
-        buffer.compute_gae(final_value.item())
-        
-        # Run PPO update epochs
-        update_info = ppo_agent.update(buffer, batch_size=128, epochs=4)
+        # Merge all environments' buffers into one main buffer
+        main_buffer.clear()
+        for i in range(num_envs):
+            main_buffer.hist_states.extend(env_buffers[i].hist_states)
+            main_buffer.actions.extend(env_buffers[i].actions)
+            main_buffer.log_probs.extend(env_buffers[i].log_probs)
+            main_buffer.rewards.extend(env_buffers[i].rewards)
+            main_buffer.dones.extend(env_buffers[i].dones)
+            main_buffer.values.extend(env_buffers[i].values)
+            main_buffer.advantages.extend(env_buffers[i].advantages)
+            main_buffer.value_targets.extend(env_buffers[i].value_targets)
+            
+        # Run PPO update epochs (utilizing the GPU with batch sizes of 128)
+        update_info = ppo_agent.update(main_buffer, batch_size=128, epochs=4)
         
         # Compute rollouts Fill Rate (Type II Service Level)
         fill_rate = max(0.0, 100.0 * (1.0 - (rollout_unfilled_demand / (rollout_total_demand + 1e-8))))
@@ -198,7 +286,7 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
         
         # Compute ETA
         elapsed_time = time.time() - start_time
-        avg_time_per_iter = elapsed_time / iteration
+        avg_time_per_iter = elapsed_time / (iteration - start_iteration + 1)
         remaining_iters = total_iterations - iteration
         eta_seconds = int(avg_time_per_iter * remaining_iters)
         eta_str = str(datetime.timedelta(seconds=eta_seconds))
@@ -225,11 +313,13 @@ def train_synapscim(network_id=1, total_iterations=1000, rollout_steps=4000, T_c
             writer.writerow([iteration, mean_reward, update_info["actor_loss"], update_info["critic_loss"], update_info["entropy"], fill_rate])
             
         # Save model checkpoints at specific milestones
-        if iteration in [10000, 15000, 20000]:
+        if iteration in [10000, 15000, 20000] or (iteration % 1000 == 0):
             # Unwrap compiled model state dict if compiled
             state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
             checkpoint_path = f"bdh_ppo_model_{iteration}.pt"
             torch.save(state, checkpoint_path)
+            # Also save to default save_path so user can easily --resume from it
+            torch.save(state, save_path)
             print(f"Model checkpoint saved to {checkpoint_path}")
         
     # Save the final trained model
@@ -294,6 +384,7 @@ if __name__ == "__main__":
     parser.add_argument("--rollout_steps", type=int, default=4000, help="Steps collected per iteration.")
     parser.add_argument("--save_path", type=str, default="bdh_ppo_model_3000.pt", help="Filepath to save final model weights.")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda", "xpu", "xla"], help="Specify hardware device.")
+    parser.add_argument("--resume", action="store_true", help="Resume training from save_path checkpoint if it exists.")
     args = parser.parse_args()
     
     train_synapscim(
@@ -301,5 +392,6 @@ if __name__ == "__main__":
         total_iterations=args.total_iterations,
         rollout_steps=args.rollout_steps,
         save_path=args.save_path,
-        device_arg=args.device
+        device_arg=args.device,
+        resume=args.resume
     )
