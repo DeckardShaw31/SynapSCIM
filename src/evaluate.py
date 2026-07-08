@@ -221,4 +221,10 @@ def evaluate_all(network_id=1, model_path=None, T_context=10):
     }
 
 if __name__ == "__main__":
-    evaluate_all(network_id=1)
+    import argparse
+    parser = argparse.ArgumentParser(description="Evaluate supply chain controllers.")
+    parser.add_argument("--network_id", type=int, default=1, help="Willems network ID.")
+    parser.add_argument("--model_path", type=str, default=None, help="Path to the trained BDH-PPO model weights.")
+    args = parser.parse_args()
+    
+    evaluate_all(network_id=args.network_id, model_path=args.model_path)
