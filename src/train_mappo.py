@@ -153,13 +153,31 @@ def train_mappo(network_id=1, total_iterations=20000, rollout_steps=2000, T_cont
     os.makedirs(save_dir, exist_ok=True)
     log_csv_path = os.path.join(save_dir, "training_log.csv")
     
-    # Check for resume options
     start_iteration = 1
     if resume and os.path.exists(save_path_wh) and os.path.exists(save_path_ret):
         print(f"Resuming training from checkpoints: {save_path_wh} & {save_path_ret}")
         try:
-            model_wh.load_state_dict(torch.load(save_path_wh, map_location=device))
-            model_ret.load_state_dict(torch.load(save_path_ret, map_location=device))
+            state_dict_wh = torch.load(save_path_wh, map_location=device)
+            state_dict_ret = torch.load(save_path_ret, map_location=device)
+            
+            # Automatically strip _orig_mod. prefix from compiled checkpoints
+            from collections import OrderedDict
+            new_state_wh = OrderedDict()
+            for k, v in state_dict_wh.items():
+                if k.startswith("_orig_mod."):
+                    new_state_wh[k[10:]] = v
+                else:
+                    new_state_wh[k] = v
+                    
+            new_state_ret = OrderedDict()
+            for k, v in state_dict_ret.items():
+                if k.startswith("_orig_mod."):
+                    new_state_ret[k[10:]] = v
+                else:
+                    new_state_ret[k] = v
+                    
+            model_wh.load_state_dict(new_state_wh)
+            model_ret.load_state_dict(new_state_ret)
             if os.path.exists(log_csv_path):
                 with open(log_csv_path, "r", encoding="utf-8") as f:
                     reader = list(csv.reader(f))
@@ -429,8 +447,20 @@ def train_mappo(network_id=1, total_iterations=20000, rollout_steps=2000, T_cont
             
         # Checkpoints saving
         if iteration in [10000, 15000, 20000] or (iteration % 1000 == 0):
-            wh_state = model_wh.module.state_dict() if hasattr(model_wh, "module") else model_wh.state_dict()
-            ret_state = model_ret.module.state_dict() if hasattr(model_ret, "module") else model_ret.state_dict()
+            if hasattr(model_wh, "_orig_mod"):
+                wh_state = model_wh._orig_mod.state_dict()
+            elif hasattr(model_wh, "module"):
+                wh_state = model_wh.module.state_dict()
+            else:
+                wh_state = model_wh.state_dict()
+                
+            if hasattr(model_ret, "_orig_mod"):
+                ret_state = model_ret._orig_mod.state_dict()
+            elif hasattr(model_ret, "module"):
+                ret_state = model_ret.module.state_dict()
+            else:
+                ret_state = model_ret.state_dict()
+                
             checkpoint_wh = os.path.join(save_dir, f"bdh_mappo_wh_{iteration}.pt")
             checkpoint_ret = os.path.join(save_dir, f"bdh_mappo_ret_{iteration}.pt")
             torch.save(wh_state, checkpoint_wh)
@@ -441,8 +471,20 @@ def train_mappo(network_id=1, total_iterations=20000, rollout_steps=2000, T_cont
             print(f"MAPPO checkpoints saved at iteration {iteration}")
             
     # Save final model
-    wh_state_final = model_wh.module.state_dict() if hasattr(model_wh, "module") else model_wh.state_dict()
-    ret_state_final = model_ret.module.state_dict() if hasattr(model_ret, "module") else model_ret.state_dict()
+    if hasattr(model_wh, "_orig_mod"):
+        wh_state_final = model_wh._orig_mod.state_dict()
+    elif hasattr(model_wh, "module"):
+        wh_state_final = model_wh.module.state_dict()
+    else:
+        wh_state_final = model_wh.state_dict()
+        
+    if hasattr(model_ret, "_orig_mod"):
+        ret_state_final = model_ret._orig_mod.state_dict()
+    elif hasattr(model_ret, "module"):
+        ret_state_final = model_ret.module.state_dict()
+    else:
+        ret_state_final = model_ret.state_dict()
+        
     torch.save(wh_state_final, save_path_wh)
     torch.save(ret_state_final, save_path_ret)
     print(f"Final MAPPO models saved to {save_path_wh} and {save_path_ret}")

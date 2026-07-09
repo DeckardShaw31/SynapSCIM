@@ -137,7 +137,16 @@ def train_synapscim(network_id=1, total_iterations=20000, rollout_steps=4000, T_
     if resume and os.path.exists(save_path):
         print(f"Resuming training from checkpoint: {save_path}")
         try:
-            model.load_state_dict(torch.load(save_path, map_location=device))
+            state_dict = torch.load(save_path, map_location=device)
+            # Automatically strip _orig_mod. prefix from compiled checkpoints
+            from collections import OrderedDict
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                if k.startswith("_orig_mod."):
+                    new_state_dict[k[10:]] = v
+                else:
+                    new_state_dict[k] = v
+            model.load_state_dict(new_state_dict)
             if os.path.exists(log_csv_path):
                 with open(log_csv_path, "r", encoding="utf-8") as f:
                     reader = list(csv.reader(f))
@@ -328,7 +337,13 @@ def train_synapscim(network_id=1, total_iterations=20000, rollout_steps=4000, T_
         # Save model checkpoints at specific milestones
         if iteration in [10000, 15000, 20000] or (iteration % 1000 == 0):
             # Unwrap compiled model state dict if compiled
-            state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+            if hasattr(model, "_orig_mod"):
+                state = model._orig_mod.state_dict()
+            elif hasattr(model, "module"):
+                state = model.module.state_dict()
+            else:
+                state = model.state_dict()
+                
             checkpoint_path = os.path.join(save_dir, f"bdh_ppo_model_{iteration}.pt")
             torch.save(state, checkpoint_path)
             # Also save to default save_path so user can easily --resume from it
@@ -336,7 +351,13 @@ def train_synapscim(network_id=1, total_iterations=20000, rollout_steps=4000, T_
             print(f"Model checkpoint saved to {checkpoint_path}")
         
     # Save the final trained model
-    state_final = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+    if hasattr(model, "_orig_mod"):
+        state_final = model._orig_mod.state_dict()
+    elif hasattr(model, "module"):
+        state_final = model.module.state_dict()
+    else:
+        state_final = model.state_dict()
+        
     torch.save(state_final, save_path)
     print(f"Model successfully saved to {save_path}")
     
