@@ -127,9 +127,10 @@ def train_synapscim(network_id=1, total_iterations=20000, rollout_steps=4000, T_
     main_buffer = RolloutBuffer()
     env_buffers = [RolloutBuffer() for _ in range(num_envs)]
     
-    # Setup metrics logging
-    os.makedirs("reports/centralized_ppo", exist_ok=True)
-    log_csv_path = "reports/centralized_ppo/training_log.csv"
+    # Setup metrics logging relative to save_path folder
+    save_dir = os.path.dirname(os.path.abspath(save_path))
+    os.makedirs(save_dir, exist_ok=True)
+    log_csv_path = os.path.join(save_dir, "training_log.csv")
     
     # Check for resume options
     start_iteration = 1
@@ -315,7 +316,7 @@ def train_synapscim(network_id=1, total_iterations=20000, rollout_steps=4000, T_
         if iteration in [10000, 15000, 20000] or (iteration % 1000 == 0):
             # Unwrap compiled model state dict if compiled
             state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
-            checkpoint_path = f"bdh_ppo_model_{iteration}.pt"
+            checkpoint_path = os.path.join(save_dir, f"bdh_ppo_model_{iteration}.pt")
             torch.save(state, checkpoint_path)
             # Also save to default save_path so user can easily --resume from it
             torch.save(state, save_path)
@@ -369,7 +370,7 @@ def train_synapscim(network_id=1, total_iterations=20000, rollout_steps=4000, T_
     axes[2, 1].axis("off")
     
     plt.tight_layout()
-    plot_path = "reports/centralized_ppo/training_progress.png"
+    plot_path = os.path.join(save_dir, "training_progress.png")
     plt.savefig(plot_path, dpi=300)
     plt.close()
     print(f"Training progress plot saved to {plot_path}")

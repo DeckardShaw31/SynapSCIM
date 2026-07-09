@@ -148,9 +148,10 @@ def train_mappo(network_id=1, total_iterations=20000, rollout_steps=2000, T_cont
     env_buffers_wh = [RolloutBuffer() for _ in range(num_envs)]
     env_buffers_ret = [RolloutBuffer() for _ in range(num_envs)]
     
-    # 3. Setup metrics logging
-    os.makedirs("reports/decentralized_mappo", exist_ok=True)
-    log_csv_path = "reports/decentralized_mappo/training_log.csv"
+    # 3. Setup metrics logging relative to save_path_wh folder
+    save_dir = os.path.dirname(os.path.abspath(save_path_wh))
+    os.makedirs(save_dir, exist_ok=True)
+    log_csv_path = os.path.join(save_dir, "training_log.csv")
     
     # Check for resume options
     start_iteration = 1
@@ -417,8 +418,8 @@ def train_mappo(network_id=1, total_iterations=20000, rollout_steps=2000, T_cont
         if iteration in [10000, 15000, 20000] or (iteration % 1000 == 0):
             wh_state = model_wh.module.state_dict() if hasattr(model_wh, "module") else model_wh.state_dict()
             ret_state = model_ret.module.state_dict() if hasattr(model_ret, "module") else model_ret.state_dict()
-            checkpoint_wh = f"bdh_mappo_wh_{iteration}.pt"
-            checkpoint_ret = f"bdh_mappo_ret_{iteration}.pt"
+            checkpoint_wh = os.path.join(save_dir, f"bdh_mappo_wh_{iteration}.pt")
+            checkpoint_ret = os.path.join(save_dir, f"bdh_mappo_ret_{iteration}.pt")
             torch.save(wh_state, checkpoint_wh)
             torch.save(ret_state, checkpoint_ret)
             # Also save to default paths for easy resume
@@ -472,7 +473,7 @@ def train_mappo(network_id=1, total_iterations=20000, rollout_steps=2000, T_cont
     axes[2, 1].axis("off")
     
     plt.tight_layout()
-    plot_path = "reports/decentralized_mappo/training_progress.png"
+    plot_path = os.path.join(save_dir, "training_progress.png")
     plt.savefig(plot_path, dpi=300)
     plt.close()
     print(f"Training progress plot saved to {plot_path}")
