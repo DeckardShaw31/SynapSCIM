@@ -166,6 +166,19 @@ def train_mappo(network_id=1, total_iterations=20000, rollout_steps=2000, T_cont
                     if len(reader) > 1:
                         start_iteration = int(reader[-1][0]) + 1
                         print(f"Resuming from iteration {start_iteration}")
+            else:
+                # Fallback: scan save_dir for bdh_mappo_wh_X.pt milestone files
+                import glob
+                import re
+                milestones = glob.glob(os.path.join(save_dir, "bdh_mappo_wh_*.pt"))
+                iters = []
+                for m in milestones:
+                    match = re.search(r"bdh_mappo_wh_(\d+)\.pt", os.path.basename(m))
+                    if match:
+                        iters.append(int(match.group(1)))
+                if len(iters) > 0:
+                    start_iteration = max(iters) + 1
+                    print(f"Log CSV not found, but found milestone checkpoints. Resuming from iteration {start_iteration}")
         except Exception as e:
             print(f"Could not load checkpoint or log files: {e}. Starting from iteration 1.")
             start_iteration = 1
