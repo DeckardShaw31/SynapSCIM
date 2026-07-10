@@ -146,7 +146,8 @@ def train_synapscim(network_id=1, total_iterations=20000, rollout_steps=4000, T_
                     new_state_dict[k[10:]] = v
                 else:
                     new_state_dict[k] = v
-            model.load_state_dict(new_state_dict)
+            target_model = model._orig_mod if hasattr(model, "_orig_mod") else model
+            target_model.load_state_dict(new_state_dict)
             if os.path.exists(log_csv_path):
                 with open(log_csv_path, "r", encoding="utf-8") as f:
                     reader = list(csv.reader(f))

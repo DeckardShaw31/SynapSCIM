@@ -176,8 +176,10 @@ def train_mappo(network_id=1, total_iterations=20000, rollout_steps=2000, T_cont
                 else:
                     new_state_ret[k] = v
                     
-            model_wh.load_state_dict(new_state_wh)
-            model_ret.load_state_dict(new_state_ret)
+            target_wh = model_wh._orig_mod if hasattr(model_wh, "_orig_mod") else model_wh
+            target_ret = model_ret._orig_mod if hasattr(model_ret, "_orig_mod") else model_ret
+            target_wh.load_state_dict(new_state_wh)
+            target_ret.load_state_dict(new_state_ret)
             if os.path.exists(log_csv_path):
                 with open(log_csv_path, "r", encoding="utf-8") as f:
                     reader = list(csv.reader(f))
