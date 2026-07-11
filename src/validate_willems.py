@@ -8,7 +8,7 @@ from willems_loader import get_willems_config, get_deterministic_demands
 from baselines import tune_baselines
 from evaluate import run_evaluation
 
-def validate_networks(network_ids=[1]):
+def validate_networks(network_ids=[1], model_path=None):
     print("\n=============================================================")
     print("           REAL-WORLD WILLEMS DATASET VALIDATION")
     print("=============================================================")
@@ -38,16 +38,36 @@ def validate_networks(network_ids=[1]):
             model = BDH_GPU(obs_dim=obs_dim, act_dim=act_dim, D=32, H=2, N=256, L=2).to(device)
             
             # Look for checkpoint specific to this network
-            model_path = None
-            for candidate in [f"bdh_ppo_model_{net_id}_20000.pt", f"bdh_ppo_model_3000.pt", f"bdh_ppo_model_1000.pt", "bdh_ppo_model.pt"]:
-                if os.path.exists(candidate):
-                    model_path = candidate
-                    break
+            resolved_path = None
+            if model_path is None:
+                for candidate in [
+                    f"SynapSCIM_checkpoints/bdh_ppo_model_{net_id}_20000.pt",
+                    "SynapSCIM_checkpoints/bdh_ppo_model_20000.pt",
+                    "SynapSCIM_checkpoints/bdh_ppo_model.pt",
+                    f"bdh_ppo_model_{net_id}_20000.pt",
+                    f"bdh_ppo_model_3000.pt",
+                    f"bdh_ppo_model_1000.pt",
+                    "bdh_ppo_model.pt"
+                ]:
+                    if os.path.exists(candidate):
+                        resolved_path = candidate
+                        break
+            else:
+                resolved_path = model_path
             
             is_random = True
-            if model_path is not None:
-                print(f"Loading model weights from {model_path}...")
-                model.load_state_dict(torch.load(model_path, map_location=device))
+            if resolved_path is not None:
+                print(f"Loading model weights from {resolved_path}...")
+                # Automatically strip _orig_mod. prefix from compiled checkpoints
+                state_dict = torch.load(resolved_path, map_location=device)
+                from collections import OrderedDict
+                new_state_dict = OrderedDict()
+                for k, v in state_dict.items():
+                    if k.startswith("_orig_mod."):
+                        new_state_dict[k[10:]] = v
+                    else:
+                        new_state_dict[k] = v
+                model.load_state_dict(new_state_dict)
                 is_random = False
             else:
                 print(f"[Warning] No trained weights found for Network {net_id}. Using randomly initialized model.")
@@ -65,7 +85,7 @@ def validate_networks(network_ids=[1]):
             
             # Write to report file
             status_str = "Trained" if not is_random else "Random (Untrained)"
-            f.write(f"Model Status: {status_str} | Weights Path: {model_path}\n")
+            f.write(f"Model Status: {status_str} | Weights Path: {resolved_path}\n")
             f.write(f"Parameters: Retailers: {env.num_retailers} | Lead Times (Ret): {env.lead_times} | Lead Time (Prod): {env.lead_time_prod}\n")
             f.write(f"{'Policy':<22} | {'Total Cost':<12} | {'Holding':<10} | {'Backorder':<10} | {'Fill Rate (SL)':<14}\n")
             f.write("-" * 75 + "\n")
@@ -82,7 +102,8 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Validate Centralized PPO on Willems topologies.")
     parser.add_argument("--networks", type=str, default="1", help="Comma-separated Willems Network IDs (e.g. 1,14,30)")
+    parser.add_argument("--model_path", type=str, default=None, help="Explicit path to model weights file.")
     args = parser.parse_args()
     
     net_list = [int(x.strip()) for x in args.networks.split(",")]
-    validate_networks(net_list)
+    validate_networks(net_list, model_path=args.model_path)
