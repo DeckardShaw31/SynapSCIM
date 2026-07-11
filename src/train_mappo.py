@@ -257,6 +257,7 @@ def train_mappo(network_id=1, total_iterations=20000, rollout_steps=2000, T_cont
         for b in env_buffers_ret:
             b.clear()
         
+        current_step = 0
         rollout_total_demand = 0.0
         rollout_unfilled_demand = 0.0
         
@@ -341,13 +342,13 @@ def train_mappo(network_id=1, total_iterations=20000, rollout_steps=2000, T_cont
                     for j in range(envs.num_retailers):
                         ret_histories[j][i] = [pad_obs(next_obs_dict[f"retailer_{j}"][i], max_ret_obs_dim)]
                         
-                    # Reset hidden states to zeros in-place
+                    # Reset hidden states to zeros in-place on next state tensors
                     for l in range(model_wh.L):
-                        hidden_wh[l][i].zero_()
+                        next_hidden_wh[l][i].zero_()
                     for l in range(model_ret.L):
                         for j in range(envs.num_retailers):
                             idx_rst = j * num_envs + i
-                            hidden_rets[l][idx_rst].zero_()
+                            next_hidden_rets[l][idx_rst].zero_()
                 else:
                     wh_histories[i].append(next_obs_dict["warehouse"][i])
                     for j in range(envs.num_retailers):
