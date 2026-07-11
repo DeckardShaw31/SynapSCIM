@@ -3,11 +3,11 @@
 =============================================================
 
 --- Willems Network Topology ID: 1 ---
-Model Status: Trained | Weights Path: bdh_ppo_model_3000.pt
+Model Status: Trained | Weights Path: SynapSCIM_checkpoints/bdh_ppo_model_20000.pt
 Parameters: Retailers: 3 | Lead Times (Ret): [5, 5, 5] | Lead Time (Prod): 3
 Policy                 | Total Cost   | Holding    | Backorder  | Fill Rate (SL)
 ---------------------------------------------------------------------------
-BDH-PPO (Ours)         |    476019.03 |   12689.46 |  434620.16 |        26.31%
+BDH-PPO (Ours)         |    475841.00 |   12695.09 |  434433.38 |        26.33%
 Base-Stock Baseline    |    312541.12 |   11453.41 |  274269.75 |        13.87%
 s, Q Policy Baseline   |    672098.04 |    1643.92 |  647954.31 |         6.61%
 =============================================================

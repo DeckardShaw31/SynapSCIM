@@ -129,7 +129,13 @@ def run_stress_test(network_id=1, model_path_ppo=None, model_path_mappo_wh="bdh_
     
     bdh_model_ppo = BDH_GPU(obs_dim=obs_dim, act_dim=act_dim, D=32, H=2, N=256, L=2).to(device)
     if model_path_ppo is None:
-        for candidate in ["bdh_ppo_model_3000.pt", "bdh_ppo_model_1000.pt", "bdh_ppo_model.pt"]:
+        for candidate in [
+            "SynapSCIM_checkpoints/bdh_ppo_model_20000.pt",
+            "SynapSCIM_checkpoints/bdh_ppo_model.pt",
+            "bdh_ppo_model_3000.pt",
+            "bdh_ppo_model_1000.pt",
+            "bdh_ppo_model.pt"
+        ]:
             if os.path.exists(candidate):
                 model_path_ppo = candidate
                 break
@@ -138,7 +144,15 @@ def run_stress_test(network_id=1, model_path_ppo=None, model_path_mappo_wh="bdh_
             
     if os.path.exists(model_path_ppo):
         print(f"Loading Centralized PPO weights from {model_path_ppo}...")
-        bdh_model_ppo.load_state_dict(torch.load(model_path_ppo, map_location=device))
+        state_dict = torch.load(model_path_ppo, map_location=device)
+        from collections import OrderedDict
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            if k.startswith("_orig_mod."):
+                new_state_dict[k[10:]] = v
+            else:
+                new_state_dict[k] = v
+        bdh_model_ppo.load_state_dict(new_state_dict)
     else:
         print("[Warning] Centralized PPO weights not found. Using randomly initialized model.")
     bdh_model_ppo.eval()
@@ -151,10 +165,39 @@ def run_stress_test(network_id=1, model_path_ppo=None, model_path_mappo_wh="bdh_
     model_ma_wh = BDH_GPU(obs_dim=wh_obs_dim, act_dim=1, D=32, H=2, N=256, L=2).to(device)
     model_ma_ret = BDH_GPU(obs_dim=max_ret_obs_dim, act_dim=1, D=32, H=2, N=256, L=2).to(device)
     
+    # Search candidates for MAPPO if defaults are specified
+    if model_path_mappo_wh == "bdh_mappo_wh.pt" and model_path_mappo_ret == "bdh_mappo_ret.pt":
+        for cand_wh, cand_ret in [
+            ("SynapSCIM_checkpoints/bdh_mappo_wh_20000.pt", "SynapSCIM_checkpoints/bdh_mappo_ret_20000.pt"),
+            ("SynapSCIM_checkpoints/bdh_mappo_wh.pt", "SynapSCIM_checkpoints/bdh_mappo_ret.pt"),
+            ("bdh_mappo_wh.pt", "bdh_mappo_ret.pt")
+        ]:
+            if os.path.exists(cand_wh) and os.path.exists(cand_ret):
+                model_path_mappo_wh = cand_wh
+                model_path_mappo_ret = cand_ret
+                break
+                
     if os.path.exists(model_path_mappo_wh) and os.path.exists(model_path_mappo_ret):
         print(f"Loading MAPPO weights from {model_path_mappo_wh} and {model_path_mappo_ret}...")
-        model_ma_wh.load_state_dict(torch.load(model_path_mappo_wh, map_location=device))
-        model_ma_ret.load_state_dict(torch.load(model_path_mappo_ret, map_location=device))
+        # Auto prefix strip MAPPO
+        state_dict_wh = torch.load(model_path_mappo_wh, map_location=device)
+        from collections import OrderedDict
+        new_wh = OrderedDict()
+        for k, v in state_dict_wh.items():
+            if k.startswith("_orig_mod."):
+                new_wh[k[10:]] = v
+            else:
+                new_wh[k] = v
+        model_ma_wh.load_state_dict(new_wh)
+        
+        state_dict_ret = torch.load(model_path_mappo_ret, map_location=device)
+        new_ret = OrderedDict()
+        for k, v in state_dict_ret.items():
+            if k.startswith("_orig_mod."):
+                new_ret[k[10:]] = v
+            else:
+                new_ret[k] = v
+        model_ma_ret.load_state_dict(new_ret)
     else:
         print("[Warning] MAPPO weights not found. Using randomly initialized model.")
     model_ma_wh.eval()
@@ -221,4 +264,17 @@ def run_stress_test(network_id=1, model_path_ppo=None, model_path_mappo_wh="bdh_
     print(f"Disruption stress test plot saved successfully to {chart_path}")
 
 if __name__ == "__main__":
-    run_stress_test(network_id=1)
+    import argparse
+    parser = argparse.ArgumentParser(description="Disruption stress testing.")
+    parser.add_argument("--network_id", type=int, default=1, help="Willems network ID.")
+    parser.add_argument("--model_path_ppo", type=str, default=None, help="Path to centralized PPO weights.")
+    parser.add_argument("--model_path_mappo_wh", type=str, default="bdh_mappo_wh.pt", help="Path to MAPPO warehouse weights.")
+    parser.add_argument("--model_path_mappo_ret", type=str, default="bdh_mappo_ret.pt", help="Path to MAPPO retailer weights.")
+    args = parser.parse_args()
+    
+    run_stress_test(
+        network_id=args.network_id,
+        model_path_ppo=args.model_path_ppo,
+        model_path_mappo_wh=args.model_path_mappo_wh,
+        model_path_mappo_ret=args.model_path_mappo_ret
+    )
