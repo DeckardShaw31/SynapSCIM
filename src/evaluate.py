@@ -116,7 +116,13 @@ def evaluate_all(network_id=1, model_path=None, T_context=10):
     
     # Auto-detect best available trained weights if model_path is not specified
     if model_path is None:
-        for candidate in ["bdh_ppo_model_3000.pt", "bdh_ppo_model_1000.pt", "bdh_ppo_model.pt"]:
+        for candidate in [
+            "SynapSCIM_checkpoints/bdh_ppo_model_20000.pt",
+            "SynapSCIM_checkpoints/bdh_ppo_model.pt",
+            "bdh_ppo_model_3000.pt",
+            "bdh_ppo_model_1000.pt",
+            "bdh_ppo_model.pt"
+        ]:
             if os.path.exists(candidate):
                 model_path = candidate
                 break
@@ -125,7 +131,15 @@ def evaluate_all(network_id=1, model_path=None, T_context=10):
             
     if os.path.exists(model_path):
         print(f"Loading trained PPO weights from {model_path} on device {device}...")
-        bdh_model.load_state_dict(torch.load(model_path, map_location=device))
+        state_dict = torch.load(model_path, map_location=device)
+        from collections import OrderedDict
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            if k.startswith("_orig_mod."):
+                new_state_dict[k[10:]] = v
+            else:
+                new_state_dict[k] = v
+        bdh_model.load_state_dict(new_state_dict)
     else:
         print(f"[Warning] Trained weights not found at {model_path}. Using randomly initialized model.")
         
