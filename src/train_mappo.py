@@ -41,7 +41,10 @@ class VectorMultiAgentEnv:
                 
             obs, rewards, terminated, truncated, info = self.envs[i].step(env_actions)
             
-            if terminated or truncated:
+            term_bool = terminated["warehouse"] if isinstance(terminated, dict) else terminated
+            trunc_bool = truncated["warehouse"] if isinstance(truncated, dict) else truncated
+            
+            if term_bool or trunc_bool:
                 reset_obs, _ = self.envs[i].reset()
                 obs_list.append(reset_obs)
             else:
