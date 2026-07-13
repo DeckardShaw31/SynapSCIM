@@ -1,0 +1,25 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest cache
+.pytest_cache/
+
+# Local scientific reports and paper materials
+reports/
+paper_materials/
+
+# Exclude temporary milestone checkpoints, but preserve the final 20k models
+SynapSCIM_checkpoints/*
+!SynapSCIM_checkpoints/bdh_ppo_model_20000.pt
+
+SynapSCIM_mappo_checkpoints/*
+!SynapSCIM_mappo_checkpoints/bdh_mappo_wh_20000.pt
+!SynapSCIM_mappo_checkpoints/bdh_mappo_ret_20000.pt
+
+# User local files
+Plan(Phase 1 - DONE).md
+Plan(Phase 2).md
+scratch/
+tests/__pycache__/
