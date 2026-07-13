@@ -12,7 +12,7 @@ Both training scripts (`train.py` and `train_mappo.py`) are fully vectorized, ru
 
 ---
 
-### 1. Centralized BDH-PPO Training ("The Hero")
+### 1. Centralized BDH-PPO Training
 To run the centralized coordinated supply chain controller:
 ```bash
 python src/train.py --total_iterations 20000 --save_path bdh_ppo_model_20000.pt --device cuda --resume
@@ -28,7 +28,7 @@ python src/train.py --total_iterations 20000 --save_path bdh_ppo_model_20000.pt 
 
 ---
 
-### 2. Decentralized MAPPO Training ("The Villain")
+### 2. Decentralized MAPPO Training
 To run the standalone multi-agent training for decentralized entities under local observations (POMDP):
 ```bash
 python src/train_mappo.py --total_iterations 20000 --save_path_wh bdh_mappo_wh_20000.pt --save_path_ret bdh_mappo_ret_20000.pt --device cuda --resume
