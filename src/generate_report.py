@@ -339,10 +339,41 @@ def generate_report():
     env_ma = MultiEchelonSupplyChainEnv(config, mode="multi_agent")
     env_ce = MultiEchelonSupplyChainEnv(config, mode="centralized")
     
-    # 1. Train MAPPO model (uses 1000 iterations default as requested by user)
-    # To prevent long waiting if the user runs on CPU, we print a advice
-    print("[Report Generator] Ready to begin training. Standard length is 1000 iterations.")
-    model_wh, model_ret = train_mappo(env_ma, num_iterations=1000)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    wh_obs_dim = env_ma.observation_spaces["warehouse"].shape[0]
+    max_ret_obs_dim = max(env_ma.observation_spaces[f"retailer_{i}"].shape[0] for i in range(env_ma.num_retailers))
+    
+    model_wh = BDH_GPU(obs_dim=wh_obs_dim, act_dim=1, D=32, H=2, N=256, L=2).to(device)
+    model_ret = BDH_GPU(obs_dim=max_ret_obs_dim, act_dim=1, D=32, H=2, N=256, L=2).to(device)
+    
+    # 1. Load trained MAPPO model checkpoints if they exist
+    mappo_wh_path = "SynapSCIM_mappo_checkpoints/bdh_mappo_wh_20000.pt"
+    mappo_ret_path = "SynapSCIM_mappo_checkpoints/bdh_mappo_ret_20000.pt"
+    
+    if os.path.exists(mappo_wh_path) and os.path.exists(mappo_ret_path):
+        print(f"[Report Generator] Loading trained MAPPO checkpoints from {mappo_wh_path} and {mappo_ret_path}...")
+        
+        state_dict_wh = torch.load(mappo_wh_path, map_location=device)
+        from collections import OrderedDict
+        new_wh = OrderedDict()
+        for k, v in state_dict_wh.items():
+            if k.startswith("_orig_mod."):
+                new_wh[k[10:]] = v
+            else:
+                new_wh[k] = v
+        model_wh.load_state_dict(new_wh)
+        
+        state_dict_ret = torch.load(mappo_ret_path, map_location=device)
+        new_ret = OrderedDict()
+        for k, v in state_dict_ret.items():
+            if k.startswith("_orig_mod."):
+                new_ret[k[10:]] = v
+            else:
+                new_ret[k] = v
+        model_ret.load_state_dict(new_ret)
+    else:
+        print("[Report Generator] Trained checkpoints not found. Training a temporary model for 1000 iterations...")
+        model_wh, model_ret = train_mappo(env_ma, num_iterations=1000)
     
     # 2. Get deterministic demands
     eval_demands = get_deterministic_demands(network_id=1, steps=100, seed=42)
@@ -454,7 +485,21 @@ To verify the generalizability of our model's performance beyond a single demand
     with open("reports/scientific_report.md", "w", encoding="utf-8") as f:
         f.write(report_content)
         
-    print("Report and figures successfully generated in the 'reports/' directory!")
+    os.makedirs("paper_materials", exist_ok=True)
+    paper_report_content = report_content.replace(
+        "warehouse_disruption_impact.png", "decentralized_mappo/warehouse_disruption_impact.png"
+    ).replace(
+        "retailer_disruption_impact.png", "decentralized_mappo/retailer_disruption_impact.png"
+    )
+    with open("paper_materials/scientific_report.md", "w", encoding="utf-8") as f:
+        f.write(paper_report_content)
+        
+    import shutil
+    os.makedirs("paper_materials/decentralized_mappo", exist_ok=True)
+    shutil.copy("reports/warehouse_disruption_impact.png", "paper_materials/decentralized_mappo/warehouse_disruption_impact.png")
+    shutil.copy("reports/retailer_disruption_impact.png", "paper_materials/decentralized_mappo/retailer_disruption_impact.png")
+        
+    print("Report and figures successfully generated in 'reports/' and 'paper_materials/' directories!")
 
 if __name__ == "__main__":
     generate_report()

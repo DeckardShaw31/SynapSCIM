@@ -9,7 +9,7 @@ This report details the performance, resilience, and statistical validity of the
 ### Scenario A: Standard Operational Seasonality (Normal)
 | Policy | Total Cost | Holding Cost | Backorder Cost | Shipping Cost |
 | :--- | :--- | :--- | :--- | :--- |
-| **Cooperative MAPPO (Ours)** | 2470028.50 | 28208.88 | 2428589.00 | 1737.30 |
+| **Cooperative MAPPO (Ours)** | 481235.16 | 12576.11 | 440040.22 | 17137.32 |
 | **Base-Stock Heuristic** | 312541.12 | 11453.41 | 274269.75 | 15980.17 |
 
 ### Scenario B: Severe Logistical Disruption Shock (Steps 40–60)
@@ -17,7 +17,7 @@ This report details the performance, resilience, and statistical validity of the
 
 | Policy | Total Cost | Holding Cost | Backorder Cost | Shipping Cost | Cost Inflation |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Cooperative MAPPO (Ours)** | 2513894.50 | 28209.27 | 2474828.50 | 1432.58 | 1.78% |
+| **Cooperative MAPPO (Ours)** | 788511.38 | 10801.94 | 754383.81 | 13961.44 | 63.85% |
 | **Base-Stock Heuristic** | 665661.93 | 8450.24 | 633826.31 | 13996.65 | 112.98% |
 
 ---
@@ -26,9 +26,9 @@ This report details the performance, resilience, and statistical validity of the
 
 To verify the generalizability of our model's performance beyond a single demand trajectory, we evaluated both policies across **30 independent random demand realizations** (different seeds).
 
-*   **Cooperative MAPPO Mean Cost:** 2474880.00 ± 23800.39
+*   **Cooperative MAPPO Mean Cost:** 484813.19 ± 23828.39
 *   **Base-Stock Mean Cost:** 314683.40 ± 24852.29
-*   **Paired t-statistic:** 3465.8930
+*   **Paired t-statistic:** 327.2668
 *   **p-value:** 0.0000e+00
 
 > [!NOTE]
@@ -47,7 +47,7 @@ To verify the generalizability of our model's performance beyond a single demand
 ## 📊 Visualized Trajectories
 
 ### 1. Warehouse Stock Trajectory under Supply Shock
-![Warehouse Stock Trajectory](warehouse_disruption_impact.png)
+![Warehouse Stock Trajectory](decentralized_mappo/warehouse_disruption_impact.png)
 
 ### 2. Retailer Stock vs Backorder under Supply Shock
-![Retailer Trajectory](retailer_disruption_impact.png)
+![Retailer Trajectory](decentralized_mappo/retailer_disruption_impact.png)
