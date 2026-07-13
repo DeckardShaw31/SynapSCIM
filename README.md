@@ -1,7 +1,66 @@
 # SynapSCIM (DRACO)
 A biologically-inspired Multi-Agent Reinforcement Learning (MARL) framework utilizing the Dragon Hatchling (BDH) architecture to optimize multi-echelon supply chains under disruption risks.
 
-![Dragon Hatchling (BDH) Neural Network Architecture](paper_materials/bdh_network_architecture.png)
+```mermaid
+graph TD
+    classDef layer fill:#f9f9f9,stroke:#333,stroke-width:1.5px;
+    classDef attention fill:#e1f5fe,stroke:#0288d1,stroke-width:1.5px;
+    classDef head fill:#fff3e0,stroke:#f57c00,stroke-width:1.5px;
+    
+    subgraph Input ["Inputs"]
+        S_t["Input State Vector / Context History: S_t <br> (Dimensions: T_context x Obs_dim)"]
+    end
+    
+    subgraph Embedding ["Embedding Echelon"]
+        Embed["Linear Embedding Layer (wte) <br> (Proj to Latent Dim D)"]
+        LN["Layer Normalization (ln)"]
+        Drop["Dropout Layer (drop)"]
+    end
+    
+    subgraph Attention ["Dragon Hatchling (BDH) Causal Attention Echelon"]
+        QKV["Query (Q), Key (K), Value (V) Projections"]
+        RoPE["Rotary Position Embeddings (RoPE) <br> (Inv Freq phase shift)"]
+        Mask["Causal Temporal Masking <br> (Lower Triangular tril mask)"]
+        LinearAttn["Causal Linear Attention Product <br> (O = softmax(Qr * Kr.mT) * V)"]
+    end
+    
+    subgraph Shared ["Latent Sequence Echelon"]
+        Latent["Shared Latent State Sequences <br> (Representations space)"]
+    end
+    
+    subgraph Output ["Actor-Critic Heads"]
+        Critic["Critic Head (Linear) <br> (State-Value estimate V_t)"]
+        Actor["Actor Head (Linear) <br> (Action Mean mu & Std sigma)"]
+    end
+    
+    subgraph Action ["Output Action Space"]
+        Clipped["Action Clamping & Sampling <br> (np.clip(action, 0, 1))"]
+    end
+    
+    %% Connections
+    S_t --> Embed
+    Embed --> LN
+    LN --> Drop
+    
+    Drop --> QKV
+    QKV --> RoPE
+    RoPE --> Mask
+    Mask --> LinearAttn
+    
+    LinearAttn --> Latent
+    
+    Latent --> Critic
+    Latent --> Actor
+    
+    Actor --> Clipped
+
+    class S_t layer;
+    class Embed,LN,Drop layer;
+    class QKV,RoPE,Mask,LinearAttn attention;
+    class Latent layer;
+    class Critic,Actor head;
+    class Clipped layer;
+```
 
 ---
 
