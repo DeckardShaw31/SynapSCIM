@@ -1,6 +1,8 @@
 # SynapSCIM (DRACO)
 A biologically-inspired Multi-Agent Reinforcement Learning (MARL) framework utilizing the Dragon Hatchling (BDH) architecture to optimize multi-echelon supply chains under disruption risks.
 
+![Dragon Hatchling (BDH) Neural Network Architecture](paper_materials/bdh_network_architecture.png)
+
 ---
 
 ## 🚀 Execution & Command-Line Interface
