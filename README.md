@@ -3,9 +3,9 @@ A biologically-inspired Multi-Agent Reinforcement Learning (MARL) framework util
 
 ```mermaid
 graph TD
-    classDef layer fill:#f9f9f9,stroke:#333,stroke-width:1.5px;
-    classDef attention fill:#e1f5fe,stroke:#0288d1,stroke-width:1.5px;
-    classDef head fill:#fff3e0,stroke:#f57c00,stroke-width:1.5px;
+    classDef layer fill:#f9f9f9,stroke:#333,stroke-width:1.5px,color:#333;
+    classDef attention fill:#e1f5fe,stroke:#0288d1,stroke-width:1.5px,color:#01579b;
+    classDef head fill:#fff3e0,stroke:#f57c00,stroke-width:1.5px,color:#e65100;
     
     subgraph Input ["Inputs"]
         S_t["Input State Vector / Context History: S_t <br> (Dimensions: T_context x Obs_dim)"]
