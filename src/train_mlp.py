@@ -5,6 +5,7 @@ import csv
 import argparse
 import time
 import datetime
+from collections import OrderedDict
 from env import MultiEchelonSupplyChainEnv
 from bdh import MLP_GPU
 from ppo import PPOAgent, RolloutBuffer, get_history
@@ -43,14 +44,23 @@ class VectorSingleAgentEnv:
             info_list
         )
 
-def get_device():
+def get_device(device_arg="auto"):
+    """Detects the fastest available hardware accelerator or uses the user-specified one."""
+    if device_arg != "auto":
+        print(f"Explicitly selecting user-specified device: {device_arg}")
+        return torch.device(device_arg)
     if torch.cuda.is_available():
-        return torch.device("cuda")
+        device = torch.device("cuda")
+        torch.backends.cudnn.benchmark = True
+        return device
     return torch.device("cpu")
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--total_iterations", type=int, default=5000)
+    parser.add_argument("--save_path", type=str, default="SynapSCIM_mlp_checkpoints/mlp_ppo_model_final.pt")
+    parser.add_argument("--resume", action="store_true", help="Resume training from save_path if it exists")
+    parser.add_argument("--device", type=str, default="auto")
     args = parser.parse_args()
 
     config = get_willems_config(1)
@@ -59,7 +69,7 @@ def main():
     env_fn = lambda: MultiEchelonSupplyChainEnv(config, mode="centralized")
     envs = VectorSingleAgentEnv(env_fn, num_envs=64)
     
-    device = get_device()
+    device = get_device(args.device)
     print("Using device:", device)
     
     obs_dim = envs.observation_space.shape[0]
@@ -68,15 +78,37 @@ def main():
     model = MLP_GPU(obs_dim=obs_dim, act_dim=act_dim, hidden_dim=128).to(device)
     ppo_agent = PPOAgent(model, lr=1e-4)
     
-    save_dir = "SynapSCIM_mlp_checkpoints"
-    os.makedirs(save_dir, exist_ok=True)
-    log_csv_path = os.path.join(save_dir, "training_log.csv")
+    # Resolve directory from save_path
+    save_dir = os.path.dirname(args.save_path)
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+    log_csv_path = os.path.join(save_dir if save_dir else ".", "training_log.csv")
     
     # Write header if new log
     if not os.path.exists(log_csv_path):
         with open(log_csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["iteration", "mean_reward", "actor_loss", "critic_loss", "entropy", "fill_rate"])
+            
+    # Load state dict if resuming
+    if args.resume and os.path.exists(args.save_path):
+        print(f"Resuming training from checkpoint: {args.save_path}")
+        state_dict = torch.load(args.save_path, map_location=device)
+        new_state = OrderedDict()
+        for k, v in state_dict.items():
+            new_state[k[10:] if k.startswith("_orig_mod.") else k] = v
+        model.load_state_dict(new_state)
+        
+    start_iteration = 1
+    if args.resume and os.path.exists(log_csv_path):
+        try:
+            with open(log_csv_path, "r", encoding="utf-8") as f:
+                reader = list(csv.reader(f))
+                if len(reader) > 1:
+                    start_iteration = int(reader[-1][0]) + 1
+                    print(f"Resuming training from iteration {start_iteration}")
+        except Exception as e:
+            print("Failed to read log CSV for starting iteration:", e)
             
     num_envs = envs.num_envs
     env_buffers = [RolloutBuffer() for _ in range(num_envs)]
@@ -90,9 +122,7 @@ def main():
     T_context = 10
     steps_per_rollout = 31
     
-    start_time = time.time()
-    
-    for iteration in range(1, args.total_iterations + 1):
+    for iteration in range(start_iteration, args.total_iterations + 1):
         for buffer in env_buffers:
             buffer.clear()
             
@@ -176,9 +206,18 @@ def main():
             writer = csv.writer(f)
             writer.writerow([iteration, mean_reward, update_info["actor_loss"], update_info["critic_loss"], update_info["entropy"], fill_rate])
             
+        # Save model checkpoints at milestones
+        if iteration in [10000, 15000, 20000] or (iteration % 1000 == 0):
+            checkpoint_dir = os.path.dirname(args.save_path)
+            checkpoint_name = f"mlp_ppo_model_{iteration}.pt"
+            checkpoint_path = os.path.join(checkpoint_dir if checkpoint_dir else ".", checkpoint_name)
+            torch.save(model.state_dict(), checkpoint_path)
+            # Save main final path too
+            torch.save(model.state_dict(), args.save_path)
+            
     # Save final model
-    torch.save(model.state_dict(), os.path.join(save_dir, "mlp_ppo_model_final.pt"))
-    print("Training finished! Final model saved.")
+    torch.save(model.state_dict(), args.save_path)
+    print(f"Training finished! Final model saved to {args.save_path}")
 
 if __name__ == "__main__":
     main()
