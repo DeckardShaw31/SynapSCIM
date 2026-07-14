@@ -4,31 +4,25 @@ A biologically-inspired Multi-Agent Reinforcement Learning (MARL) framework util
 ```mermaid
 graph TD
     classDef layer fill:#f9f9f9,stroke:#333,stroke-width:1.5px,color:#333;
-    classDef attention fill:#e1f5fe,stroke:#0288d1,stroke-width:1.5px,color:#01579b;
+    classDef Hebbian fill:#e1f5fe,stroke:#0288d1,stroke-width:1.5px,color:#01579b;
     classDef head fill:#fff3e0,stroke:#f57c00,stroke-width:1.5px,color:#e65100;
     
-    subgraph Input ["Inputs"]
-        S_t["Input State Vector / Context History: S_t <br> (Dimensions: T_context x Obs_dim)"]
+    subgraph Input ["Step Inputs"]
+        X_t["Step Observation State: x_t <br> (Local node state at step t)"]
     end
     
-    subgraph Embedding ["Embedding Echelon"]
-        Embed["Linear Embedding Layer (wte) <br> (Proj to Latent Dim D)"]
-        LN["Layer Normalization (ln)"]
-        Drop["Dropout Layer (drop)"]
+    subgraph Projections ["Neuromorphic Projections"]
+        Proj["Linear Feature Map & Normalization"]
+        QKV["Feature Extractors: Query (Q_t), Key (K_t), Value (v_t)"]
     end
     
-    subgraph Attention ["Dragon Hatchling (BDH) Causal Attention Echelon"]
-        QKV["Query (Q), Key (K), Value (V) Projections"]
-        RoPE["Rotary Position Embeddings (RoPE) <br> (Inv Freq phase shift)"]
-        Mask["Causal Temporal Masking <br> (Lower Triangular tril mask)"]
-        LinearAttn["Causal Linear Attention Product <br> (O = softmax(Qr * Kr.mT) * V)"]
+    subgraph Memory ["Hebbian Working Memory Core"]
+        Synapse["Synaptic Memory Matrix: &rho;_t <br> (256 Virtual Neuron Particles)"]
+        Update["Hebbian Plasticity Update Rule: <br> &rho;_t = &rho;_{t-1} + K_t^T v_t <br> (Outer-product weight association)"]
+        Retrieval["Associative Retrieval Query: <br> O_t = Q_t &rho;_t"]
     end
     
-    subgraph Shared ["Latent Sequence Echelon"]
-        Latent["Shared Latent State Sequences <br> (Representations space)"]
-    end
-    
-    subgraph Output ["Actor-Critic Heads"]
+    subgraph Output ["Actor-Critic Policy Decoders"]
         Critic["Critic Head (Linear) <br> (State-Value estimate V_t)"]
         Actor["Actor Head (Linear) <br> (Action Mean mu & Std sigma)"]
     end
@@ -38,26 +32,21 @@ graph TD
     end
     
     %% Connections
-    S_t --> Embed
-    Embed --> LN
-    LN --> Drop
+    X_t --> Proj
+    Proj --> QKV
     
-    Drop --> QKV
-    QKV --> RoPE
-    RoPE --> Mask
-    Mask --> LinearAttn
+    QKV --> Update
+    Update --> Synapse
+    Synapse --> Retrieval
     
-    LinearAttn --> Latent
-    
-    Latent --> Critic
-    Latent --> Actor
+    Retrieval --> Critic
+    Retrieval --> Actor
     
     Actor --> Clipped
 
-    class S_t layer;
-    class Embed,LN,Drop layer;
-    class QKV,RoPE,Mask,LinearAttn attention;
-    class Latent layer;
+    class X_t layer;
+    class Proj,QKV layer;
+    class Synapse,Update,Retrieval Hebbian;
     class Critic,Actor head;
     class Clipped layer;
 ```
