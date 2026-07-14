@@ -23,3 +23,5 @@ Plan(Phase 1 - DONE).md
 Plan(Phase 2).md
 scratch/
 tests/__pycache__/
+
+SynapSCIM_mlp_checkpoints/

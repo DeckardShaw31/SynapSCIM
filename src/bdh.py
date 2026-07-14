@@ -194,3 +194,41 @@ class BDH_GPU(nn.Module):
         state_value = self.critic(v_last)
         
         return action_mu, action_std, state_value, next_states
+
+class MLP_GPU(nn.Module):
+    """
+    Standard MLP Feed-Forward Deep Reinforcement Learning baseline architecture.
+    Receives a flattened history context window of states and maps to actions.
+    """
+    def __init__(self, obs_dim, act_dim, hidden_dim=128):
+        super().__init__()
+        self.obs_dim = obs_dim
+        self.act_dim = act_dim
+        
+        # Flatten history window of size 10 (T_context) * obs_dim
+        self.net = nn.Sequential(
+            nn.Linear(obs_dim * 10, hidden_dim),
+            nn.ReLU(),
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.LayerNorm(hidden_dim),
+        )
+        
+        self.actor_mu = nn.Linear(hidden_dim, act_dim)
+        self.actor_log_std = nn.Linear(hidden_dim, act_dim)
+        self.critic = nn.Linear(hidden_dim, 1)
+
+    def forward(self, obs_seq):
+        # obs_seq shape: [B, T_context, obs_dim]
+        B, T, D = obs_seq.size()
+        x = obs_seq.reshape(B, T * D) # Flatten history window
+        feat = self.net(x)
+        
+        action_mu = torch.sigmoid(self.actor_mu(feat))
+        log_std = torch.clamp(self.actor_log_std(feat), min=-20.0, max=2.0)
+        action_std = torch.exp(log_std)
+        state_value = self.critic(feat)
+        
+        return action_mu, action_std, state_value
+
