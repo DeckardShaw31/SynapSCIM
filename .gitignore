@@ -27,3 +27,7 @@ tests/__pycache__/
 SynapSCIM_mlp_checkpoints/
 SynapSCIM_mlpppo_checkpoints/*
 !SynapSCIM_mlpppo_checkpoints/mlp_ppo_model_final.pt
+
+SynapSCIM_gnn_checkpoints/*
+!SynapSCIM_gnn_checkpoints/gnn_ppo_model_final.pt
+

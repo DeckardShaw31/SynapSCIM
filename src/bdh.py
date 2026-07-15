@@ -232,3 +232,74 @@ class MLP_GPU(nn.Module):
         
         return action_mu, action_std, state_value
 
+
+class GNN_PPO_Model(nn.Module):
+    """
+    Graph Neural Network (GNN) policy network baseline using Graph Convolutional Networks (GCN).
+    Uses message passing via an adjacency matrix to coordinate decisions across supply chain echelons.
+    """
+    def __init__(self, obs_dim, act_dim, num_nodes=3, hidden_dim=64):
+        super().__init__()
+        self.num_nodes = num_nodes
+        self.obs_dim = obs_dim
+        self.act_dim = act_dim
+        
+        # Graph Topology: Node 0 (Warehouse) -> Retailer 1 (Node 1) & Retailer 2 (Node 2)
+        # Adding self-loops is standard for GCNs
+        adj = torch.tensor([
+            [1.0, 1.0, 1.0],  # Warehouse connects to itself and both retailers
+            [1.0, 1.0, 0.0],  # Retailer 1 connects to itself and Warehouse
+            [1.0, 0.0, 1.0]   # Retailer 2 connects to itself and Warehouse
+        ], dtype=torch.float32)
+        
+        # Normalize the adjacency matrix (row normalization)
+        row_sum = adj.sum(dim=1, keepdim=True)
+        self.register_buffer("norm_adj", adj / row_sum)
+        
+        # node_feature_dim is (T_context * obs_dim) // num_nodes
+        node_feature_dim = (10 * obs_dim) // num_nodes
+        
+        self.gcn_layer1 = nn.Linear(node_feature_dim, hidden_dim)
+        self.gcn_layer2 = nn.Linear(hidden_dim, hidden_dim)
+        
+        flat_dim = num_nodes * hidden_dim
+        
+        self.actor_mu = nn.Linear(flat_dim, act_dim)
+        self.actor_log_std = nn.Linear(flat_dim, act_dim)
+        self.critic = nn.Linear(flat_dim, 1)
+
+    def forward(self, obs_seq):
+        # obs_seq shape: [B, T_context, obs_dim]
+        B, T, D = obs_seq.size()
+        
+        # Flatten temporal window: [B, T * D]
+        x = obs_seq.reshape(B, T * D)
+        
+        # Reshape to (Batch, Nodes, Node_Features)
+        x = x.reshape(B, self.num_nodes, -1)
+        
+        # Ensure adjacency matrix is on correct device and matches batch size
+        adj = self.norm_adj.unsqueeze(0).expand(B, -1, -1).to(obs_seq.device)
+        
+        # GCN Layer 1: Message Passing + ReLU
+        # H^(1) = ReLU( A * X * W_1 )
+        x = torch.bmm(adj, x)
+        x = F.relu(self.gcn_layer1(x))
+        
+        # GCN Layer 2: Message Passing + ReLU
+        # H^(2) = ReLU( A * H^(1) * W_2 )
+        x = torch.bmm(adj, x)
+        x = F.relu(self.gcn_layer2(x))
+        
+        # Flatten graph representation: [B, Nodes * Hidden_Dim]
+        flat_x = x.reshape(B, -1)
+        
+        # Actor and Critic heads
+        action_mu = torch.sigmoid(self.actor_mu(flat_x))
+        log_std = torch.clamp(self.actor_log_std(flat_x), min=-20.0, max=2.0)
+        action_std = torch.exp(log_std)
+        state_value = self.critic(flat_x)
+        
+        return action_mu, action_std, state_value
+
+
