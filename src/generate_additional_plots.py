@@ -10,10 +10,18 @@ def generate_detailed_plots():
     ppo_log_path = "SynapSCIM_checkpoints/training_log.csv"
     mappo_log_path = "SynapSCIM_mappo_checkpoints/training_log.csv"
     mlp_log_path = "SynapSCIM_mlpppo_checkpoints/training_log.csv"
+    gnn_log_path = "SynapSCIM_gnn_checkpoints/training_log.csv"
     
     df_ppo = pd.read_csv(ppo_log_path)
     df_mappo = pd.read_csv(mappo_log_path)
     df_mlp = pd.read_csv(mlp_log_path)
+    
+    has_gnn = os.path.exists(gnn_log_path)
+    if has_gnn:
+        print("Found GNN-PPO training log. Loading GNN curves...")
+        df_gnn = pd.read_csv(gnn_log_path)
+    else:
+        print("[Warning] GNN-PPO training log not found at SynapSCIM_gnn_checkpoints/training_log.csv.")
     
     window_size = 100
     
@@ -28,6 +36,8 @@ def generate_detailed_plots():
     axes[0, 0].plot(df_ppo['iteration'], smooth(df_ppo['mean_reward'] / 100.0), label='BDH-PPO (Centralized)', color='#1f77b4', linewidth=1.5)
     axes[0, 0].plot(df_mappo['iteration'], smooth(df_mappo['joint_reward']), label='MAPPO (Decentralized)', color='#d62728', linewidth=1.5, linestyle='--')
     axes[0, 0].plot(df_mlp['iteration'], smooth(df_mlp['mean_reward'] / 100.0), label='MLP-PPO (Baseline)', color='#9467bd', linewidth=1.5, linestyle='-.')
+    if has_gnn:
+        axes[0, 0].plot(df_gnn['iteration'], smooth(df_gnn['mean_reward'] / 100.0), label='GNN-PPO (GNN Baseline)', color='#8c564b', linewidth=1.5, linestyle=':')
     axes[0, 0].set_xlabel('Iteration', fontsize=10, fontweight='bold')
     axes[0, 0].set_ylabel('Average Step Reward', fontsize=10, fontweight='bold')
     axes[0, 0].set_title('Reward Convergence Curve', fontsize=11, fontweight='bold')
@@ -38,6 +48,8 @@ def generate_detailed_plots():
     axes[0, 1].plot(df_ppo['iteration'], smooth(df_ppo['fill_rate']), label='BDH-PPO (Centralized)', color='#1f77b4', linewidth=1.5)
     axes[0, 1].plot(df_mappo['iteration'], smooth(df_mappo['fill_rate']), label='MAPPO (Decentralized)', color='#d62728', linewidth=1.5, linestyle='--')
     axes[0, 1].plot(df_mlp['iteration'], smooth(df_mlp['fill_rate']), label='MLP-PPO (Baseline)', color='#9467bd', linewidth=1.5, linestyle='-.')
+    if has_gnn:
+        axes[0, 1].plot(df_gnn['iteration'], smooth(df_gnn['fill_rate']), label='GNN-PPO (GNN Baseline)', color='#8c564b', linewidth=1.5, linestyle=':')
     axes[0, 1].set_xlabel('Iteration', fontsize=10, fontweight='bold')
     axes[0, 1].set_ylabel('Service Level (Fill Rate %)', fontsize=10, fontweight='bold')
     axes[0, 1].set_title('Service Level (Fill Rate) Comparison', fontsize=11, fontweight='bold')
@@ -46,10 +58,11 @@ def generate_detailed_plots():
     
     # 3. Bottom-Left: Critic Loss Comparison
     axes[1, 0].plot(df_ppo['iteration'], smooth(df_ppo['critic_loss']), label='BDH-PPO (Centralized)', color='#1f77b4', linewidth=1.2, alpha=0.8)
-    # Average of WH and Retailer critic loss for MAPPO
     mappo_critic = (df_mappo['wh_critic_loss'] + df_mappo['ret_critic_loss']) / 2.0
     axes[1, 0].plot(df_mappo['iteration'], smooth(mappo_critic), label='MAPPO (Decentralized Avg)', color='#d62728', linewidth=1.2, linestyle='--', alpha=0.8)
     axes[1, 0].plot(df_mlp['iteration'], smooth(df_mlp['critic_loss']), label='MLP-PPO (Baseline)', color='#9467bd', linewidth=1.2, linestyle='-.', alpha=0.8)
+    if has_gnn:
+        axes[1, 0].plot(df_gnn['iteration'], smooth(df_gnn['critic_loss']), label='GNN-PPO (GNN Baseline)', color='#8c564b', linewidth=1.2, linestyle=':', alpha=0.8)
     axes[1, 0].set_yscale('log')
     axes[1, 0].set_xlabel('Iteration', fontsize=10, fontweight='bold')
     axes[1, 0].set_ylabel('Critic Loss (Log Scale)', fontsize=10, fontweight='bold')
@@ -62,6 +75,8 @@ def generate_detailed_plots():
     mappo_actor = (df_mappo['wh_actor_loss'] + df_mappo['ret_actor_loss']) / 2.0
     axes[1, 1].plot(df_mappo['iteration'], smooth(mappo_actor), label='MAPPO (Decentralized Avg)', color='#d62728', linewidth=1.2, linestyle='--', alpha=0.8)
     axes[1, 1].plot(df_mlp['iteration'], smooth(df_mlp['actor_loss']), label='MLP-PPO (Baseline)', color='#9467bd', linewidth=1.2, linestyle='-.', alpha=0.8)
+    if has_gnn:
+        axes[1, 1].plot(df_gnn['iteration'], smooth(df_gnn['actor_loss']), label='GNN-PPO (GNN Baseline)', color='#8c564b', linewidth=1.2, linestyle=':', alpha=0.8)
     axes[1, 1].set_xlabel('Iteration', fontsize=10, fontweight='bold')
     axes[1, 1].set_ylabel('Actor Loss', fontsize=10, fontweight='bold')
     axes[1, 1].set_title('Actor Policy Gradient Loss', fontsize=11, fontweight='bold')
@@ -156,6 +171,88 @@ def generate_detailed_plots():
     plt.savefig(mlp_standalone_path, dpi=300)
     plt.close()
     print(f"Saved MLP-PPO standalone training analysis plot to {mlp_standalone_path}")
+
+    # --- PLOT 3: 3x2 Standalone GNN-PPO training curves (if available) ---
+    if has_gnn:
+        fig, axes = plt.subplots(3, 2, figsize=(14, 15), dpi=300)
+        
+        # 1. Reward (Top-Left)
+        axes[0, 0].plot(df_gnn['iteration'], df_gnn['mean_reward'] / 100.0, color='#8c564b', alpha=0.3, label='Raw Step Reward')
+        axes[0, 0].plot(df_gnn['iteration'], smooth(df_gnn['mean_reward'] / 100.0), color='#5c352e', linewidth=2, label='Smoothed (EMA-100)')
+        axes[0, 0].set_xlabel('Iteration', fontsize=10)
+        axes[0, 0].set_ylabel('Step Reward', fontsize=10)
+        axes[0, 0].set_title('GNN-PPO Step Reward Convergence', fontsize=11, fontweight='bold')
+        axes[0, 0].grid(True, linestyle=':', alpha=0.5)
+        axes[0, 0].legend()
+        
+        # 2. Fill Rate (Top-Right)
+        axes[0, 1].plot(df_gnn['iteration'], df_gnn['fill_rate'], color='#e377c2', alpha=0.3, label='Raw Fill Rate')
+        axes[0, 1].plot(df_gnn['iteration'], smooth(df_gnn['fill_rate']), color='#b12483', linewidth=2, label='Smoothed (EMA-100)')
+        axes[0, 1].set_xlabel('Iteration', fontsize=10)
+        axes[0, 1].set_ylabel('Fill Rate (Service Level %)', fontsize=10)
+        axes[0, 1].set_title('GNN-PPO Service Level (Fill Rate) Growth', fontsize=11, fontweight='bold')
+        axes[0, 1].grid(True, linestyle=':', alpha=0.5)
+        axes[0, 1].legend()
+        
+        # 3. Actor Loss (Middle-Left)
+        axes[1, 0].plot(df_gnn['iteration'], df_gnn['actor_loss'], color='#bcbd22', alpha=0.3, label='Raw Actor Loss')
+        axes[1, 0].plot(df_gnn['iteration'], smooth(df_gnn['actor_loss']), color='#82850a', linewidth=2, label='Smoothed (EMA-100)')
+        axes[1, 0].set_xlabel('Iteration', fontsize=10)
+        axes[1, 0].set_ylabel('Actor Loss', fontsize=10)
+        axes[1, 0].set_title('GNN-PPO Actor Policy Loss Curve', fontsize=11, fontweight='bold')
+        axes[1, 0].grid(True, linestyle=':', alpha=0.5)
+        axes[1, 0].legend()
+        
+        # 4. Critic Loss (Middle-Right)
+        axes[1, 1].plot(df_gnn['iteration'], df_gnn['critic_loss'], color='#17becf', alpha=0.3, label='Raw Critic Loss')
+        axes[1, 1].plot(df_gnn['iteration'], smooth(df_gnn['critic_loss']), color='#0a7b87', linewidth=2, label='Smoothed (EMA-100)')
+        axes[1, 1].set_yscale('log')
+        axes[1, 1].set_xlabel('Iteration', fontsize=10)
+        axes[1, 1].set_ylabel('Critic Loss (Log Scale)', fontsize=10)
+        axes[1, 1].set_title('GNN-PPO Value Function (Critic) Loss', fontsize=11, fontweight='bold')
+        axes[1, 1].grid(True, linestyle=':', alpha=0.5)
+        axes[1, 1].legend()
+        
+        # 5. Entropy (Bottom-Left)
+        axes[2, 0].plot(df_gnn['iteration'], df_gnn['entropy'], color='#ff7f0e', alpha=0.3, label='Raw Entropy')
+        axes[2, 0].plot(df_gnn['iteration'], smooth(df_gnn['entropy']), color='#d15904', linewidth=2, label='Smoothed (EMA-100)')
+        axes[2, 0].set_xlabel('Iteration', fontsize=10)
+        axes[2, 0].set_ylabel('Policy Entropy', fontsize=10)
+        axes[2, 0].set_title('GNN-PPO Action Space Exploration Entropy', fontsize=11, fontweight='bold')
+        axes[2, 0].grid(True, linestyle=':', alpha=0.5)
+        axes[2, 0].legend()
+        
+        # 6. Summary Stats Text Box (Bottom-Right)
+        axes[2, 1].axis('off')
+        gnn_summary_text = (
+            "=========================================\n"
+            "      GNN-PPO BASELINE SUMMARY METRICS\n"
+            "=========================================\n\n"
+            f"Training Iterations: {len(df_gnn):,}\n"
+            f"Starting Average Reward: {df_gnn['mean_reward'].iloc[0]/100.0:.2f}\n"
+            f"Ending Average Reward: {df_gnn['mean_reward'].iloc[-1]/100.0:.2f}\n"
+            f"Final Fill Rate: {df_gnn['fill_rate'].iloc[-1]:.2f}%\n"
+            f"Min Critic Loss: {df_gnn['critic_loss'].min():.4f}\n"
+            f"Max Exploration Entropy: {df_gnn['entropy'].max():.4f}\n"
+            f"Final Exploration Entropy: {df_gnn['entropy'].iloc[-1]:.4f}\n\n"
+            "Baseline Performance Insights:\n"
+            "- GNN message passing averages neighbor\n"
+            "  features, causing feature oversmoothing.\n"
+            "- Oversmoothing blurs local inventory gaps,\n"
+            "  making the policy order suboptimally,\n"
+            "  resulting in lower rewards."
+        )
+        axes[2, 1].text(0.05, 0.95, gnn_summary_text, transform=axes[2, 1].transAxes,
+                        fontsize=10.5, family='monospace', verticalalignment='top',
+                        bbox=dict(boxstyle='round,pad=0.8', facecolor='#f5f5f5', edgecolor='#cccccc'))
+        
+        plt.suptitle('GNN-PPO Graph Neural Baseline Training Analysis', fontsize=14, fontweight='bold', y=0.96)
+        plt.tight_layout(rect=[0, 0, 1, 0.94])
+        
+        gnn_standalone_path = "paper_materials/centralized_ppo/gnn_ppo_training_convergence.png"
+        plt.savefig(gnn_standalone_path, dpi=300)
+        plt.close()
+        print(f"Saved GNN-PPO standalone training analysis plot to {gnn_standalone_path}")
 
 if __name__ == "__main__":
     generate_detailed_plots()
