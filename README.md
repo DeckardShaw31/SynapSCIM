@@ -94,19 +94,31 @@ python src/train_mappo.py --total_iterations 20000 --save_path_wh bdh_mappo_wh_2
 
 ---
 
-### 3. Policy Evaluation Benchmark
-To run the standard evaluation comparing Centralized BDH-PPO, Base-Stock, and $(s, Q)$ policies:
+### 3. Centralized GNN-PPO Baseline Training
+To run the Centralized GNN-PPO baseline coordinated supply chain controller:
 ```bash
-python src/evaluate.py --network_id 1 --model_path bdh_ppo_model_1000.pt
+python src/train_gnn.py --total_iterations 20000 --save_path SynapSCIM_gnn_checkpoints/gnn_ppo_model_final.pt --device cuda --resume
+```
+* **Arguments**:
+  * `--total_iterations` (default: `20000`): Total training iterations.
+  * `--save_path` (default: `SynapSCIM_gnn_checkpoints/gnn_ppo_model_final.pt`): Weights file save destination.
+  * `--device` (default: `auto`, choices: `auto`, `cpu`, `cuda`): Override target hardware accelerator.
+  * `--resume`: Flag to automatically resume training from checkpoint and append progress to logs.
+
+---
+
+### 4. Policy Evaluation Benchmark
+To run the standard evaluation comparing Centralized BDH-PPO, MAPPO, MLP-PPO, GNN-PPO, Base-Stock, and $(s, Q)$ policies:
+```bash
+python src/evaluate.py --network_id 1
 ```
 * **Arguments**:
   * `--network_id` (default: `1`): Willems Network ID to evaluate on.
-  * `--model_path` (default: `None`): Explicit path to model weights file. If not specified, checks `bdh_ppo_model_3000.pt` $\rightarrow$ `bdh_ppo_model_1000.pt` $\rightarrow$ `bdh_ppo_model.pt`.
 * **Behavior**: Outputs costs, backorders, and deterministic Type II Service Level (Fill Rate) comparing all policies. Generates `reports/centralized_ppo/evaluation_comparison.png` and text table logs.
 
 ---
 
-### 4. Disruption Outage & Demand Surge Stress Test
+### 5. Disruption Outage & Demand Surge Stress Test
 To trigger the combined logistics capacity disruption and demand surge scenario:
 ```bash
 python src/stress_test.py
@@ -115,7 +127,7 @@ python src/stress_test.py
 
 ---
 
-### 5. Willems Dataset Generalization Validation
+### 6. Willems Dataset Generalization Validation
 To validate model generalizability across standard Willems dataset network configurations:
 ```bash
 python src/validate_willems.py --networks 1
@@ -135,6 +147,7 @@ Below are the benchmark validation results comparing our biologically-inspired *
 | **BDH-PPO** | **Centralized (Global State)** | **475,841.00** | **12,695.09** | **434,433.38** | **26.33%** |
 | **MAPPO** | **Decentralized (POMDP Local)** | **481,119.06** | **12,582.36** | **439,915.66** | **25.65%** |
 | **MLP-PPO** | Centralized DRL Baseline | 1,335,293.12 | 28,376.95 | 1,285,056.75 | 35.27% |
+| **GNN-PPO** | Centralized GNN Baseline | 1,681,437.25 | 259.02 | 1,673,021.75 | 2.02% |
 | **Base-Stock** | Traditional safety-stock | 312,541.12 | 11,453.41 | 274,269.75 | 13.87% |
 | **$(s, Q)$ Policy** | Traditional reorder points | 672,098.04 | 1,643.92 | 647,954.31 | 6.61% |
 
@@ -142,3 +155,4 @@ Below are the benchmark validation results comparing our biologically-inspired *
 1. **Decentralized Coordination Capability**: The Decentralized MAPPO policy (which operates strictly under localized observations with Hebbian fast weights) achieves **25.65% service level**, which is **within 0.68%** of the Centralized PPO model (**26.33%**) having full global visibility. This demonstrates that multi-agent reinforcement learning can successfully coordinate complex supply networks without needing global state sharing.
 2. **Double the Performance of Traditional Baselines**: Both Centralized BDH-PPO and Decentralized MAPPO **nearly double** the service level of the tuned Base-Stock baseline (**13.87%**) and **quadruple** the $(s, Q)$ baseline (**6.61%**). This highlights the capability of neural attention architectures to manage long multi-day shipping lead times compared to standard heuristics.
 3. **Mitigating DRL Oversmoothing & Instability**: Standard DRL architectures like MLP-PPO lack structured spatial/recurrent inductive biases, leading to severe oversmoothing. While MLP-PPO achieves a service level of **35.27%** by occasionally flooding the network, it suffers from a massive operational cost of **$1,335,293.12** (2.8x higher than BDH-PPO) due to excessive holding and backorder cascades. BDH-PPO mitigates this, keeping costs at **$475,841.00** while keeping echelons synchronized.
+4. **The GNN Oversmoothing Problem**: Standard graph neural network architectures like GNN-PPO average information from neighbor nodes, which leads to "feature oversmoothing" as network structures scale. Without the fast Hebbian associative memory core of BDH-PPO, GNN-PPO is unable to maintain node-level feature distinctiveness, leading to poor policy updates, a complete collapse in fill rate (**2.02%**), and extremely high shortage costs.

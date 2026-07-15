@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from collections import OrderedDict
 from env import MultiEchelonSupplyChainEnv
 from willems_loader import get_willems_config, get_deterministic_demands
-from bdh import BDH_GPU, MLP_GPU
+from bdh import BDH_GPU, MLP_GPU, GNN_PPO_Model
 from ppo import get_history
 from baselines import tune_baselines
 from evaluate import pad_obs
@@ -168,6 +168,43 @@ def run_simulations(network_id=1):
     mappo_ret_ratio = np.var(mappo_retailer_orders) / (np.var(customer_demands) + 1e-8)
     mappo_wh_ratio = np.var(mappo_warehouse_orders) / (np.var(mappo_retailer_orders) + 1e-8)
 
+    # ------------------ 3.5 GNN-PPO ------------------
+    env_gnn = MultiEchelonSupplyChainEnv(config, mode="centralized")
+    env_gnn.eval_demand = eval_demands_scaled
+    model_gnn = GNN_PPO_Model(obs_dim=obs_dim, act_dim=act_dim, num_nodes=3, hidden_dim=64).to(device)
+    gnn_path = "SynapSCIM_gnn_checkpoints/gnn_ppo_model_final.pt"
+    if os.path.exists(gnn_path):
+        state_dict_gnn = torch.load(gnn_path, map_location=device)
+        new_gnn = OrderedDict()
+        for k, v in state_dict_gnn.items():
+            new_gnn[k[10:] if k.startswith("_orig_mod.") else k] = v
+        model_gnn.load_state_dict(new_gnn)
+    model_gnn.eval()
+    
+    obs, _ = env_gnn.reset(seed=42)
+    obs = env_gnn.get_obs()
+    episode_obs_gnn = [obs]
+    gnn_retailer_orders = []
+    gnn_warehouse_orders = []
+    
+    for step in range(steps):
+        t = len(episode_obs_gnn) - 1
+        hist_obs = get_history(episode_obs_gnn, t, 10)
+        hist_obs_t = torch.tensor(hist_obs, dtype=torch.float32).unsqueeze(0).to(device)
+        with torch.no_grad():
+            action_mu, _, _ = model_gnn(hist_obs_t)
+        action = action_mu.cpu().numpy()[0]
+        action_clipped = np.clip(action, 0.0, 1.0)
+        
+        obs, reward, term, trunc, info = env_gnn.step(action_clipped)
+        episode_obs_gnn.append(obs)
+        
+        gnn_retailer_orders.append(np.sum(action_clipped[1:] * env_gnn.max_ship))
+        gnn_warehouse_orders.append(action_clipped[0] * env_gnn.max_prod)
+        
+    gnn_ret_ratio = np.var(gnn_retailer_orders) / (np.var(customer_demands) + 1e-8)
+    gnn_wh_ratio = np.var(gnn_warehouse_orders) / (np.var(gnn_retailer_orders) + 1e-8)
+
     # ------------------ 4. Base-Stock ------------------
     env_bs = MultiEchelonSupplyChainEnv(config, mode="centralized")
     env_bs.eval_demand = eval_demands_scaled
@@ -197,22 +234,25 @@ def run_simulations(network_id=1):
     bdh_vals = [floor_val(bdh_ret_ratio), floor_val(bdh_wh_ratio)]
     mappo_vals = [floor_val(mappo_ret_ratio), floor_val(mappo_wh_ratio)]
     mlp_vals = [floor_val(mlp_ret_ratio), floor_val(mlp_wh_ratio)]
+    gnn_vals = [floor_val(gnn_ret_ratio), floor_val(gnn_wh_ratio)]
     
     print("Calculated Bullwhip ratios for plotting:")
     print(f"Base-Stock: {bs_vals}")
     print(f"BDH-PPO:    {bdh_vals}")
     print(f"MAPPO:      {mappo_vals}")
     print(f"MLP-PPO:    {mlp_vals}")
+    print(f"GNN-PPO:    {gnn_vals}")
     
     x = np.arange(len(labels))
-    width = 0.2
+    width = 0.15
     
     fig, ax = plt.subplots(figsize=(10, 6.5), dpi=300)
     
-    rects1 = ax.bar(x - 1.5*width, bs_vals, width, label='Base-Stock Heuristic (Fragile Heuristic)', color='#2ca02c', edgecolor='black', linewidth=0.7)
-    rects2 = ax.bar(x - 0.5*width, bdh_vals, width, label='BDH-PPO (Centralized Coordinated)', color='#1f77b4', edgecolor='black', linewidth=0.7)
-    rects3 = ax.bar(x + 0.5*width, mappo_vals, width, label='MAPPO (Decentralized Cooperative)', color='#d62728', edgecolor='black', linewidth=0.7)
-    rects4 = ax.bar(x + 1.5*width, mlp_vals, width, label='MLP-PPO (Centralized DRL Baseline)', color='#9467bd', edgecolor='black', linewidth=0.7)
+    rects1 = ax.bar(x - 2.0*width, bs_vals, width, label='Base-Stock Heuristic (Fragile Heuristic)', color='#2ca02c', edgecolor='black', linewidth=0.7)
+    rects2 = ax.bar(x - 1.0*width, bdh_vals, width, label='BDH-PPO (Centralized Coordinated)', color='#1f77b4', edgecolor='black', linewidth=0.7)
+    rects3 = ax.bar(x, mappo_vals, width, label='MAPPO (Decentralized Cooperative)', color='#d62728', edgecolor='black', linewidth=0.7)
+    rects4 = ax.bar(x + 1.0*width, mlp_vals, width, label='MLP-PPO (Centralized DRL Baseline)', color='#9467bd', edgecolor='black', linewidth=0.7)
+    rects5 = ax.bar(x + 2.0*width, gnn_vals, width, label='GNN-PPO (GNN Baseline)', color='#8c564b', edgecolor='black', linewidth=0.7)
     
     ax.set_yscale('log')
     ax.set_ylabel('Bullwhip Ratio (Variance of Orders / Variance of Demand)\n[Logarithmic Scale]', fontsize=11, fontweight='bold', labelpad=10)
@@ -248,6 +288,7 @@ def run_simulations(network_id=1):
     add_labels(rects2, [bdh_ret_ratio, bdh_wh_ratio])
     add_labels(rects3, [mappo_ret_ratio, mappo_wh_ratio])
     add_labels(rects4, [mlp_ret_ratio, mlp_wh_ratio])
+    add_labels(rects5, [gnn_ret_ratio, gnn_wh_ratio])
     
     ax.grid(axis='y', which='both', linestyle=':', alpha=0.5)
     ax.legend(loc="upper left", fontsize=9.5, framealpha=0.95, facecolor='white', edgecolor='#cccccc')

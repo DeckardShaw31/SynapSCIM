@@ -236,33 +236,40 @@ class MLP_GPU(nn.Module):
 class GNN_PPO_Model(nn.Module):
     """
     Graph Neural Network (GNN) policy network baseline using Graph Convolutional Networks (GCN).
-    Uses message passing via an adjacency matrix to coordinate decisions across supply chain echelons.
+    Uses message passing via a dynamically constructed adjacency matrix to coordinate decisions
+    across supply chain echelons.
     """
-    def __init__(self, obs_dim, act_dim, num_nodes=3, hidden_dim=64):
+    def __init__(self, obs_dim, act_dim, num_nodes=None, hidden_dim=64):
         super().__init__()
-        self.num_nodes = num_nodes
+        # In centralized mode, act_dim is 1 (Warehouse) + num_retailers
+        # So the total number of nodes is act_dim
+        self.num_nodes = act_dim if num_nodes is None else num_nodes
         self.obs_dim = obs_dim
         self.act_dim = act_dim
         
-        # Graph Topology: Node 0 (Warehouse) -> Retailer 1 (Node 1) & Retailer 2 (Node 2)
-        # Adding self-loops is standard for GCNs
-        adj = torch.tensor([
-            [1.0, 1.0, 1.0],  # Warehouse connects to itself and both retailers
-            [1.0, 1.0, 0.0],  # Retailer 1 connects to itself and Warehouse
-            [1.0, 0.0, 1.0]   # Retailer 2 connects to itself and Warehouse
-        ], dtype=torch.float32)
+        # Construct adjacency matrix: Node 0 (Warehouse) connects to all echelons
+        # Adding self-loops on diagonal
+        adj = torch.zeros(self.num_nodes, self.num_nodes)
+        for i in range(self.num_nodes):
+            adj[i, i] = 1.0
+        adj[0, :] = 1.0
+        adj[:, 0] = 1.0
         
         # Normalize the adjacency matrix (row normalization)
         row_sum = adj.sum(dim=1, keepdim=True)
         self.register_buffer("norm_adj", adj / row_sum)
         
-        # node_feature_dim is (T_context * obs_dim) // num_nodes
-        node_feature_dim = (10 * obs_dim) // num_nodes
+        # Determine node feature dimension with padding if not perfectly divisible
+        total_features = 10 * obs_dim
+        rem = total_features % self.num_nodes
+        if rem != 0:
+            total_features += (self.num_nodes - rem)
+        node_feature_dim = total_features // self.num_nodes
         
         self.gcn_layer1 = nn.Linear(node_feature_dim, hidden_dim)
         self.gcn_layer2 = nn.Linear(hidden_dim, hidden_dim)
         
-        flat_dim = num_nodes * hidden_dim
+        flat_dim = self.num_nodes * hidden_dim
         
         self.actor_mu = nn.Linear(flat_dim, act_dim)
         self.actor_log_std = nn.Linear(flat_dim, act_dim)
@@ -275,6 +282,13 @@ class GNN_PPO_Model(nn.Module):
         # Flatten temporal window: [B, T * D]
         x = obs_seq.reshape(B, T * D)
         
+        # Pad flat context dimension if not divisible by self.num_nodes
+        total_features = T * D
+        rem = total_features % self.num_nodes
+        if rem != 0:
+            pad_size = self.num_nodes - rem
+            x = F.pad(x, (0, pad_size), "constant", 0.0)
+            
         # Reshape to (Batch, Nodes, Node_Features)
         x = x.reshape(B, self.num_nodes, -1)
         
@@ -301,5 +315,6 @@ class GNN_PPO_Model(nn.Module):
         state_value = self.critic(flat_x)
         
         return action_mu, action_std, state_value
+
 
 
