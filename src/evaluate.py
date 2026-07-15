@@ -304,7 +304,7 @@ def evaluate_all(network_id=1, model_path=None, T_context=10):
     mlp_model.eval()
 
     # 4.2 Instantiate and load GNN-PPO baseline agent
-    gnn_model = GNN_PPO_Model(obs_dim=obs_dim, act_dim=act_dim, num_nodes=3, hidden_dim=64).to(device)
+    gnn_model = GNN_PPO_Model(obs_dim=obs_dim, act_dim=act_dim, num_nodes=act_dim, hidden_dim=64).to(device)
     gnn_path = "SynapSCIM_gnn_checkpoints/gnn_ppo_model_final.pt"
     if os.path.exists(gnn_path):
         print(f"Loading trained GNN-PPO weights from {gnn_path}...")

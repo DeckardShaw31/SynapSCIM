@@ -75,8 +75,8 @@ def main():
     obs_dim = envs.observation_space.shape[0]
     act_dim = envs.action_space.shape[0]
     
-    # Willems Network 1: 1 Warehouse + 2 Retailers = 3 nodes total
-    model = GNN_PPO_Model(obs_dim=obs_dim, act_dim=act_dim, num_nodes=3, hidden_dim=64).to(device)
+    # Willems Network: 1 Warehouse + J Retailers = act_dim nodes total
+    model = GNN_PPO_Model(obs_dim=obs_dim, act_dim=act_dim, num_nodes=act_dim, hidden_dim=64).to(device)
     ppo_agent = PPOAgent(model, lr=1e-4)
     
     # Resolve directory from save_path

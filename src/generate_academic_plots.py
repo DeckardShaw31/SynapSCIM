@@ -171,7 +171,7 @@ def run_simulations(network_id=1):
     # ------------------ 3.5 GNN-PPO ------------------
     env_gnn = MultiEchelonSupplyChainEnv(config, mode="centralized")
     env_gnn.eval_demand = eval_demands_scaled
-    model_gnn = GNN_PPO_Model(obs_dim=obs_dim, act_dim=act_dim, num_nodes=3, hidden_dim=64).to(device)
+    model_gnn = GNN_PPO_Model(obs_dim=obs_dim, act_dim=act_dim, num_nodes=act_dim, hidden_dim=64).to(device)
     gnn_path = "SynapSCIM_gnn_checkpoints/gnn_ppo_model_final.pt"
     if os.path.exists(gnn_path):
         state_dict_gnn = torch.load(gnn_path, map_location=device)

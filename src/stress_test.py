@@ -223,7 +223,7 @@ def run_stress_test(network_id=1, model_path_ppo=None, model_path_mappo_wh="bdh_
     bdh_model_mlp.eval()
     
     # 2.8 Load GNN-PPO baseline model
-    bdh_model_gnn = GNN_PPO_Model(obs_dim=obs_dim, act_dim=act_dim, num_nodes=3, hidden_dim=64).to(device)
+    bdh_model_gnn = GNN_PPO_Model(obs_dim=obs_dim, act_dim=act_dim, num_nodes=act_dim, hidden_dim=64).to(device)
     gnn_path = "SynapSCIM_gnn_checkpoints/gnn_ppo_model_final.pt"
     if os.path.exists(gnn_path):
         print(f"Loading GNN-PPO weights from {gnn_path}...")
