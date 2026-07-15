@@ -398,7 +398,7 @@ def evaluate_all(network_id=1, model_path=None, T_context=10):
     axes[1].plot(sq_sum_stock, label="s, Q Policy Heuristic", color="#d62728", linewidth=2)
     axes[1].set_title("Total Retailer On-Hand Stock Levels", fontsize=12, fontweight='bold')
     axes[1].set_ylabel("Stock Units", fontsize=10)
-    axes[1].legend(loc="upper right")
+    axes[1].legend(loc="upper left")
     axes[1].grid(True, linestyle="--", alpha=0.6)
     
     # Subplot 3: Total Retailer Backorders over time
