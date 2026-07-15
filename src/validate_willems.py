@@ -4,7 +4,7 @@ import torch
 import numpy as np
 from collections import OrderedDict
 from env import MultiEchelonSupplyChainEnv
-from bdh import BDH_GPU
+from bdh import BDH_GPU, MLP_GPU
 from willems_loader import get_willems_config, get_deterministic_demands
 from baselines import tune_baselines
 from evaluate import run_evaluation
@@ -153,6 +153,25 @@ def validate_networks(network_ids=[1], model_path=None):
             
             model.eval()
             
+            # Load MLP-PPO baseline model
+            model_mlp = MLP_GPU(obs_dim=obs_dim, act_dim=act_dim, hidden_dim=128).to(device)
+            mlp_path = "SynapSCIM_mlpppo_checkpoints/mlp_ppo_model_final.pt"
+            is_mlp_random = True
+            if os.path.exists(mlp_path):
+                print(f"Loading MLP-PPO weights from {mlp_path}...")
+                state_dict_mlp = torch.load(mlp_path, map_location=device)
+                new_mlp = OrderedDict()
+                for k, v in state_dict_mlp.items():
+                    if k.startswith("_orig_mod."):
+                        new_mlp[k[10:]] = v
+                    else:
+                        new_mlp[k] = v
+                model_mlp.load_state_dict(new_mlp)
+                is_mlp_random = False
+            else:
+                print(f"[Warning] No trained MLP-PPO weights found. Using randomly initialized model.")
+            model_mlp.eval()
+            
             # Load Cooperative MAPPO models
             env_ma = MultiEchelonSupplyChainEnv(config, mode="multi_agent")
             wh_obs_dim = env_ma.observation_spaces["warehouse"].shape[0]
@@ -213,21 +232,25 @@ def validate_networks(network_ids=[1], model_path=None):
             # Run evaluations
             res_bdh = run_evaluation(env, "bdh_ppo", model, eval_demands)
             res_mappo = run_mappo_evaluation(env_ma, model_ma_wh, model_ma_ret, eval_demands)
+            res_mlp = run_evaluation(env, "mlp_ppo", model_mlp, eval_demands)
             res_bs = run_evaluation(env, "base_stock", bs_policy, eval_demands)
             res_sq = run_evaluation(env, "sq", sq_policy, eval_demands)
             
             # Write to report file
             status_str = "Trained" if not is_random else "Random (Untrained)"
             status_ma_str = "Trained" if not is_mappo_random else "Random (Untrained)"
+            status_mlp_str = "Trained" if not is_mlp_random else "Random (Untrained)"
             f.write(f"Centralized PPO Status: {status_str} | Weights Path: {resolved_path}\n")
             f.write(f"Decentralized MAPPO Status: {status_ma_str} | WH Path: {mappo_wh_path} | RET Path: {mappo_ret_path}\n")
+            f.write(f"MLP-PPO Baseline Status: {status_mlp_str} | Weights Path: {mlp_path}\n")
             f.write(f"Parameters: Retailers: {env.num_retailers} | Lead Times (Ret): {env.lead_times} | Lead Time (Prod): {env.lead_time_prod}\n")
-            f.write(f"{'Policy':<22} | {'Total Cost':<12} | {'Holding':<10} | {'Backorder':<10} | {'Fill Rate (SL)':<14}\n")
-            f.write("-" * 75 + "\n")
-            f.write(f"{'BDH-PPO (Centralized)':<22} | {res_bdh['total_cost']:12.2f} | {res_bdh['holding_cost']:10.2f} | {res_bdh['backorder_cost']:10.2f} | {res_bdh['service_level']:12.2f}%\n")
-            f.write(f"{'MAPPO (Decentralized)':<22} | {res_mappo['total_cost']:12.2f} | {res_mappo['holding_cost']:10.2f} | {res_mappo['backorder_cost']:10.2f} | {res_mappo['service_level']:12.2f}%\n")
-            f.write(f"{'Base-Stock Baseline':<22} | {res_bs['total_cost']:12.2f} | {res_bs['holding_cost']:10.2f} | {res_bs['backorder_cost']:10.2f} | {res_bs['service_level']:12.2f}%\n")
-            f.write(f"{'s, Q Policy Baseline':<22} | {res_sq['total_cost']:12.2f} | {res_sq['holding_cost']:10.2f} | {res_sq['backorder_cost']:10.2f} | {res_sq['service_level']:12.2f}%\n")
+            f.write(f"{'Policy':<25} | {'Total Cost':<12} | {'Holding':<10} | {'Backorder':<10} | {'Fill Rate (SL)':<14}\n")
+            f.write("-" * 80 + "\n")
+            f.write(f"{'BDH-PPO (Centralized)':<25} | {res_bdh['total_cost']:12.2f} | {res_bdh['holding_cost']:10.2f} | {res_bdh['backorder_cost']:10.2f} | {res_bdh['service_level']:12.2f}%\n")
+            f.write(f"{'MAPPO (Decentralized)':<25} | {res_mappo['total_cost']:12.2f} | {res_mappo['holding_cost']:10.2f} | {res_mappo['backorder_cost']:10.2f} | {res_mappo['service_level']:12.2f}%\n")
+            f.write(f"{'MLP-PPO (DRL Baseline)':<25} | {res_mlp['total_cost']:12.2f} | {res_mlp['holding_cost']:10.2f} | {res_mlp['backorder_cost']:10.2f} | {res_mlp['service_level']:12.2f}%\n")
+            f.write(f"{'Base-Stock Baseline':<25} | {res_bs['total_cost']:12.2f} | {res_bs['holding_cost']:10.2f} | {res_bs['backorder_cost']:10.2f} | {res_bs['service_level']:12.2f}%\n")
+            f.write(f"{'s, Q Policy Baseline':<25} | {res_sq['total_cost']:12.2f} | {res_sq['holding_cost']:10.2f} | {res_sq['backorder_cost']:10.2f} | {res_sq['service_level']:12.2f}%\n")
             f.write("=============================================================\n\n")
             
             print(f"Network {net_id} validation completed.")

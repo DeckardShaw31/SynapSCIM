@@ -4,7 +4,7 @@ import os
 import matplotlib.pyplot as plt
 from collections import OrderedDict
 from env import MultiEchelonSupplyChainEnv
-from bdh import BDH_GPU
+from bdh import BDH_GPU, MLP_GPU
 from ppo import get_history
 from willems_loader import get_willems_config, get_deterministic_demands
 from baselines import tune_baselines
@@ -134,7 +134,7 @@ def run_evaluation(env, policy_type, policy_model, deterministic_demands, T_cont
         hist_obs = get_history(episode_obs, t, T_context)
         
         # Decide action based on policy type
-        if policy_type == "bdh_ppo":
+        if policy_type in ["bdh_ppo", "mlp_ppo"]:
             device = next(policy_model.parameters()).device
             hist_obs_t = torch.tensor(hist_obs, dtype=torch.float32).unsqueeze(0).to(device)
             with torch.no_grad():
@@ -286,7 +286,24 @@ def evaluate_all(network_id=1, model_path=None, T_context=10):
     model_ma_wh.eval()
     model_ma_ret.eval()
     
-    # 4. Instantiate and tune traditional heuristics
+    # 4. Instantiate and load MLP-PPO baseline agent
+    mlp_model = MLP_GPU(obs_dim=obs_dim, act_dim=act_dim, hidden_dim=128).to(device)
+    mlp_path = "SynapSCIM_mlpppo_checkpoints/mlp_ppo_model_final.pt"
+    if os.path.exists(mlp_path):
+        print(f"Loading trained MLP-PPO weights from {mlp_path}...")
+        state_dict_mlp = torch.load(mlp_path, map_location=device)
+        new_mlp = OrderedDict()
+        for k, v in state_dict_mlp.items():
+            if k.startswith("_orig_mod."):
+                new_mlp[k[10:]] = v
+            else:
+                new_mlp[k] = v
+        mlp_model.load_state_dict(new_mlp)
+    else:
+        print(f"[Warning] MLP weights not found at {mlp_path}. Using randomly initialized MLP model.")
+    mlp_model.eval()
+
+    # 4.5 Instantiate and tune traditional heuristics
     print("Tuning traditional Base-Stock and (s, Q) policies...")
     bs_policy, sq_policy = tune_baselines(env, eval_demands, steps=100)
     
@@ -294,6 +311,7 @@ def evaluate_all(network_id=1, model_path=None, T_context=10):
     print("Running simulations...")
     bdh_results = run_evaluation(env, "bdh_ppo", bdh_model, eval_demands, T_context)
     mappo_results = run_mappo_evaluation(env_ma, model_ma_wh, model_ma_ret, eval_demands, T_context)
+    mlp_results = run_evaluation(env, "mlp_ppo", mlp_model, eval_demands, T_context)
     bs_results = run_evaluation(env, "base_stock", bs_policy, eval_demands, T_context)
     sq_results = run_evaluation(env, "sq", sq_policy, eval_demands, T_context)
     
@@ -301,12 +319,13 @@ def evaluate_all(network_id=1, model_path=None, T_context=10):
     print("\n=============================================================")
     print(f"               BENCHMARK RESULTS (Network {network_id})")
     print("=============================================================")
-    print(f"{'Policy':<22} | {'Total Cost':<12} | {'Holding':<10} | {'Backorder':<10} | {'Service Level':<14}")
-    print("-" * 77)
-    print(f"{'BDH-PPO (Centralized)':<22} | {bdh_results['total_cost']:12.2f} | {bdh_results['holding_cost']:10.2f} | {bdh_results['backorder_cost']:10.2f} | {bdh_results['service_level']:12.2f}%")
-    print(f"{'MAPPO (Decentralized)':<22} | {mappo_results['total_cost']:12.2f} | {mappo_results['holding_cost']:10.2f} | {mappo_results['backorder_cost']:10.2f} | {mappo_results['service_level']:12.2f}%")
-    print(f"{'Base-Stock':<22} | {bs_results['total_cost']:12.2f} | {bs_results['holding_cost']:10.2f} | {bs_results['backorder_cost']:10.2f} | {bs_results['service_level']:12.2f}%")
-    print(f"{'s, Q Policy':<22} | {sq_results['total_cost']:12.2f} | {sq_results['holding_cost']:10.2f} | {sq_results['backorder_cost']:10.2f} | {sq_results['service_level']:12.2f}%")
+    print(f"{'Policy':<25} | {'Total Cost':<12} | {'Holding':<10} | {'Backorder':<10} | {'Service Level':<14}")
+    print("-" * 80)
+    print(f"{'BDH-PPO (Centralized)':<25} | {bdh_results['total_cost']:12.2f} | {bdh_results['holding_cost']:10.2f} | {bdh_results['backorder_cost']:10.2f} | {bdh_results['service_level']:12.2f}%")
+    print(f"{'MAPPO (Decentralized)':<25} | {mappo_results['total_cost']:12.2f} | {mappo_results['holding_cost']:10.2f} | {mappo_results['backorder_cost']:10.2f} | {mappo_results['service_level']:12.2f}%")
+    print(f"{'MLP-PPO (DRL Baseline)':<25} | {mlp_results['total_cost']:12.2f} | {mlp_results['holding_cost']:10.2f} | {mlp_results['backorder_cost']:10.2f} | {mlp_results['service_level']:12.2f}%")
+    print(f"{'Base-Stock':<25} | {bs_results['total_cost']:12.2f} | {bs_results['holding_cost']:10.2f} | {bs_results['backorder_cost']:10.2f} | {bs_results['service_level']:12.2f}%")
+    print(f"{'s, Q Policy':<25} | {sq_results['total_cost']:12.2f} | {sq_results['holding_cost']:10.2f} | {sq_results['backorder_cost']:10.2f} | {sq_results['service_level']:12.2f}%")
     print("=============================================================\n")
     
     # 7. Save results to report files
@@ -318,12 +337,13 @@ def evaluate_all(network_id=1, model_path=None, T_context=10):
         f.write("=============================================================\n")
         f.write(f"               BENCHMARK RESULTS (Network {network_id})\n")
         f.write("=============================================================\n")
-        f.write(f"{'Policy':<22} | {'Total Cost':<12} | {'Holding':<10} | {'Backorder':<10} | {'Service Level (Fill Rate)':<14}\n")
-        f.write("-" * 87 + "\n")
-        f.write(f"{'BDH-PPO (Centralized)':<22} | {bdh_results['total_cost']:12.2f} | {bdh_results['holding_cost']:10.2f} | {bdh_results['backorder_cost']:10.2f} | {bdh_results['service_level']:12.2f}%\n")
-        f.write(f"{'MAPPO (Decentralized)':<22} | {mappo_results['total_cost']:12.2f} | {mappo_results['holding_cost']:10.2f} | {mappo_results['backorder_cost']:10.2f} | {mappo_results['service_level']:12.2f}%\n")
-        f.write(f"{'Base-Stock':<22} | {bs_results['total_cost']:12.2f} | {bs_results['holding_cost']:10.2f} | {bs_results['backorder_cost']:10.2f} | {bs_results['service_level']:12.2f}%\n")
-        f.write(f"{'s, Q Policy':<22} | {sq_results['total_cost']:12.2f} | {sq_results['holding_cost']:10.2f} | {sq_results['backorder_cost']:10.2f} | {sq_results['service_level']:12.2f}%\n")
+        f.write(f"{'Policy':<25} | {'Total Cost':<12} | {'Holding':<10} | {'Backorder':<10} | {'Service Level (Fill Rate)':<14}\n")
+        f.write("-" * 90 + "\n")
+        f.write(f"{'BDH-PPO (Centralized)':<25} | {bdh_results['total_cost']:12.2f} | {bdh_results['holding_cost']:10.2f} | {bdh_results['backorder_cost']:10.2f} | {bdh_results['service_level']:12.2f}%\n")
+        f.write(f"{'MAPPO (Decentralized)':<25} | {mappo_results['total_cost']:12.2f} | {mappo_results['holding_cost']:10.2f} | {mappo_results['backorder_cost']:10.2f} | {mappo_results['service_level']:12.2f}%\n")
+        f.write(f"{'MLP-PPO (DRL Baseline)':<25} | {mlp_results['total_cost']:12.2f} | {mlp_results['holding_cost']:10.2f} | {mlp_results['backorder_cost']:10.2f} | {mlp_results['service_level']:12.2f}%\n")
+        f.write(f"{'Base-Stock':<25} | {bs_results['total_cost']:12.2f} | {bs_results['holding_cost']:10.2f} | {bs_results['backorder_cost']:10.2f} | {bs_results['service_level']:12.2f}%\n")
+        f.write(f"{'s, Q Policy':<25} | {sq_results['total_cost']:12.2f} | {sq_results['holding_cost']:10.2f} | {sq_results['backorder_cost']:10.2f} | {sq_results['service_level']:12.2f}%\n")
         f.write("=============================================================\n")
     print(f"Benchmark results table saved to {report_txt_path}")
     
@@ -333,6 +353,7 @@ def evaluate_all(network_id=1, model_path=None, T_context=10):
     # Subplot 1: Cumulative Cost
     axes[0].plot(bdh_results["cost_trajectory"], label="BDH-PPO (Centralized)", color="#1f77b4", linewidth=2)
     axes[0].plot(mappo_results["cost_trajectory"], label="MAPPO (Decentralized)", color="#ff7f0e", linewidth=2, linestyle="--")
+    axes[0].plot(mlp_results["cost_trajectory"], label="MLP-PPO (DRL Baseline)", color="#9467bd", linewidth=2, linestyle="-.")
     axes[0].plot(bs_results["cost_trajectory"], label="Base-Stock Heuristic", color="#2ca02c", linewidth=2)
     axes[0].plot(sq_results["cost_trajectory"], label="s, Q Policy Heuristic", color="#d62728", linewidth=2)
     axes[0].set_title("Cumulative Operational Cost Comparison", fontsize=12, fontweight='bold')
@@ -343,11 +364,13 @@ def evaluate_all(network_id=1, model_path=None, T_context=10):
     # Subplot 2: Total Retailer Stock levels over time
     bdh_sum_stock = [np.sum(s) for s in bdh_results["ret_stock_trajectory"]]
     mappo_sum_stock = [np.sum(s) for s in mappo_results["ret_stock_trajectory"]]
+    mlp_sum_stock = [np.sum(s) for s in mlp_results["ret_stock_trajectory"]]
     bs_sum_stock = [np.sum(s) for s in bs_results["ret_stock_trajectory"]]
     sq_sum_stock = [np.sum(s) for s in sq_results["ret_stock_trajectory"]]
     
     axes[1].plot(bdh_sum_stock, label="BDH-PPO (Centralized)", color="#1f77b4", linewidth=2)
     axes[1].plot(mappo_sum_stock, label="MAPPO (Decentralized)", color="#ff7f0e", linewidth=2, linestyle="--")
+    axes[1].plot(mlp_sum_stock, label="MLP-PPO (DRL Baseline)", color="#9467bd", linewidth=2, linestyle="-.")
     axes[1].plot(bs_sum_stock, label="Base-Stock Heuristic", color="#2ca02c", linewidth=2)
     axes[1].plot(sq_sum_stock, label="s, Q Policy Heuristic", color="#d62728", linewidth=2)
     axes[1].set_title("Total Retailer On-Hand Stock Levels", fontsize=12, fontweight='bold')
@@ -358,11 +381,13 @@ def evaluate_all(network_id=1, model_path=None, T_context=10):
     # Subplot 3: Total Retailer Backorders over time
     bdh_sum_backorder = [np.sum(b) for b in bdh_results["backorder_trajectory"]]
     mappo_sum_backorder = [np.sum(b) for b in mappo_results["backorder_trajectory"]]
+    mlp_sum_backorder = [np.sum(b) for b in mlp_results["backorder_trajectory"]]
     bs_sum_backorder = [np.sum(b) for b in bs_results["backorder_trajectory"]]
     sq_sum_backorder = [np.sum(b) for b in sq_results["backorder_trajectory"]]
     
     axes[2].plot(bdh_sum_backorder, label="BDH-PPO (Centralized)", color="#1f77b4", linewidth=2)
     axes[2].plot(mappo_sum_backorder, label="MAPPO (Decentralized)", color="#ff7f0e", linewidth=2, linestyle="--")
+    axes[2].plot(mlp_sum_backorder, label="MLP-PPO (DRL Baseline)", color="#9467bd", linewidth=2, linestyle="-.")
     axes[2].plot(bs_sum_backorder, label="Base-Stock Heuristic", color="#2ca02c", linewidth=2)
     axes[2].plot(sq_sum_backorder, label="s, Q Policy Heuristic", color="#d62728", linewidth=2)
     axes[2].set_title("Total Retailer Backorders (Shortages)", fontsize=12, fontweight='bold')
@@ -380,6 +405,7 @@ def evaluate_all(network_id=1, model_path=None, T_context=10):
     return {
         "bdh": bdh_results,
         "mappo": mappo_results,
+        "mlp": mlp_results,
         "base_stock": bs_results,
         "sq": sq_results
     }
