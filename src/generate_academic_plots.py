@@ -226,28 +226,31 @@ def run_simulations(network_id=1):
     ax.set_ylim(1e-6, 1e7)
     
     # Helper function to format values beautifully on the bars
-    def add_labels(rects):
-        for rect in rects:
+    def add_labels(rects, raw_vals):
+        for i, rect in enumerate(rects):
             height = rect.get_height()
-            if height >= 1e5:
-                label_text = f"{height:.1e}"
-            elif height <= 1e-4:
-                label_text = "~0"
+            val = raw_vals[i]
+            if val >= 1e5:
+                label_text = f"{val:.2e}"
+            elif val == 0.0:
+                label_text = "0.000"
+            elif val < 1e-3:
+                label_text = f"{val:.1e}"
             else:
-                label_text = f"{height:.3f}"
+                label_text = f"{val:.3f}"
             ax.annotate(label_text,
                         xy=(rect.get_x() + rect.get_width() / 2, height),
                         xytext=(0, 3),  # 3 points vertical offset
                         textcoords="offset points",
                         ha='center', va='bottom', fontsize=8.5, fontweight='bold')
 
-    add_labels(rects1)
-    add_labels(rects2)
-    add_labels(rects3)
-    add_labels(rects4)
+    add_labels(rects1, [bs_ret_ratio, bs_wh_ratio])
+    add_labels(rects2, [bdh_ret_ratio, bdh_wh_ratio])
+    add_labels(rects3, [mappo_ret_ratio, mappo_wh_ratio])
+    add_labels(rects4, [mlp_ret_ratio, mlp_wh_ratio])
     
     ax.grid(axis='y', which='both', linestyle=':', alpha=0.5)
-    ax.legend(loc="upper right", fontsize=9.5, framealpha=0.95, facecolor='white', edgecolor='#cccccc')
+    ax.legend(loc="upper left", fontsize=9.5, framealpha=0.95, facecolor='white', edgecolor='#cccccc')
     
     plt.tight_layout()
     chart_path = "paper_materials/centralized_ppo/bullwhip_dampening.png"
