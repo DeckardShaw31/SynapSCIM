@@ -65,7 +65,7 @@ def generate_detailed_plots():
     axes[1, 1].set_xlabel('Iteration', fontsize=10, fontweight='bold')
     axes[1, 1].set_ylabel('Actor Loss', fontsize=10, fontweight='bold')
     axes[1, 1].set_title('Actor Policy Policy Gradient Loss', fontsize=11, fontweight='bold')
-    axes[1, 1].legend(loc='lower left')
+    axes[1, 1].legend(loc='upper right')
     axes[1, 1].grid(True, linestyle=':', alpha=0.6)
     
     plt.suptitle('Detailed Training Convergence Benchmark (All Models)', fontsize=14, fontweight='bold', y=0.96)
