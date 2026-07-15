@@ -13,6 +13,7 @@ def generate_convergence_plots():
     ppo_log_path = "SynapSCIM_checkpoints/training_log.csv"
     mappo_log_path = "SynapSCIM_mappo_checkpoints/training_log.csv"
     mlp_log_path = "SynapSCIM_mlpppo_checkpoints/training_log.csv"
+    gnn_log_path = "SynapSCIM_gnn_checkpoints/training_log.csv"
     
     if not os.path.exists(ppo_log_path) or not os.path.exists(mappo_log_path):
         print(f"[Error] Core training logs not found at {ppo_log_path} or {mappo_log_path}")
@@ -26,7 +27,6 @@ def generate_convergence_plots():
     
     ppo_reward_smoothed = (df_ppo['mean_reward'] / 100.0).rolling(window=window_size, min_periods=1).mean()
     mappo_reward_smoothed = df_mappo['joint_reward'].rolling(window=window_size, min_periods=1).mean()
-    
     ppo_fill_smoothed = df_ppo['fill_rate'].rolling(window=window_size, min_periods=1).mean()
     mappo_fill_smoothed = df_mappo['fill_rate'].rolling(window=window_size, min_periods=1).mean()
     
@@ -35,6 +35,12 @@ def generate_convergence_plots():
         df_mlp = pd.read_csv(mlp_log_path)
         mlp_reward_smoothed = (df_mlp['mean_reward'] / 100.0).rolling(window=window_size, min_periods=1).mean()
         mlp_fill_smoothed = df_mlp['fill_rate'].rolling(window=window_size, min_periods=1).mean()
+        
+    has_gnn = os.path.exists(gnn_log_path)
+    if has_gnn:
+        df_gnn = pd.read_csv(gnn_log_path)
+        gnn_reward_smoothed = (df_gnn['mean_reward'] / 100.0).rolling(window=window_size, min_periods=1).mean()
+        gnn_fill_smoothed = df_gnn['fill_rate'].rolling(window=window_size, min_periods=1).mean()
     
     # 1. Plot Convergence Figure (2-panel: Reward and Fill Rate)
     fig, axes = plt.subplots(1, 2, figsize=(14, 5.5), dpi=300)
@@ -44,10 +50,12 @@ def generate_convergence_plots():
     axes[0].plot(df_mappo['iteration'], mappo_reward_smoothed, label='MAPPO (Decentralized)', color='#d62728', linewidth=1.8, linestyle='--')
     if has_mlp:
         axes[0].plot(df_mlp['iteration'], mlp_reward_smoothed, label='MLP-PPO (DRL Baseline)', color='#9467bd', linewidth=1.8, linestyle='-.')
+    if has_gnn:
+        axes[0].plot(df_gnn['iteration'], gnn_reward_smoothed, label='GNN-PPO (GNN Baseline)', color='#8c564b', linewidth=1.8, linestyle=':')
     axes[0].set_xlabel('Iteration', fontsize=11, fontweight='bold')
     axes[0].set_ylabel('Average Step Reward (Smoothed)', fontsize=11, fontweight='bold')
     axes[0].set_title('Training Reward Convergence Curve', fontsize=12, fontweight='bold', pad=10)
-    axes[0].legend(loc='lower right', framealpha=0.9, edgecolor='#cccccc')
+    axes[0].legend(loc='upper right', framealpha=0.9, edgecolor='#cccccc')
     axes[0].grid(True, linestyle=':', alpha=0.6)
     
     # Right Panel: Fill Rate Convergence
@@ -55,6 +63,8 @@ def generate_convergence_plots():
     axes[1].plot(df_mappo['iteration'], mappo_fill_smoothed, label='MAPPO (Decentralized)', color='#d62728', linewidth=1.8, linestyle='--')
     if has_mlp:
         axes[1].plot(df_mlp['iteration'], mlp_fill_smoothed, label='MLP-PPO (DRL Baseline)', color='#9467bd', linewidth=1.8, linestyle='-.')
+    if has_gnn:
+        axes[1].plot(df_gnn['iteration'], gnn_fill_smoothed, label='GNN-PPO (GNN Baseline)', color='#8c564b', linewidth=1.8, linestyle=':')
     axes[1].set_xlabel('Iteration', fontsize=11, fontweight='bold')
     axes[1].set_ylabel('Fill Rate (Service Level %)', fontsize=11, fontweight='bold')
     axes[1].set_title('Service Level (Fill Rate) Growth during Training', fontsize=12, fontweight='bold', pad=10)
@@ -77,15 +87,16 @@ def generate_benchmark_bar_charts():
         'BDH-PPO\n(Centralized)', 
         'MAPPO\n(Decentralized)', 
         'MLP-PPO\n(DRL Baseline)', 
+        'GNN-PPO\n(GNN Baseline)',
         'Base-Stock\n(Baseline)', 
         's, Q Policy\n(Baseline)'
     ]
-    total_costs = [475841.00, 481119.06, 1335293.12, 312541.12, 672098.04]
-    fill_rates = [26.33, 25.65, 35.27, 13.87, 6.61]
+    total_costs = [475841.00, 481119.06, 1335293.12, 2568003.25, 312541.12, 672098.04]
+    fill_rates = [26.33, 25.65, 35.27, 3.25, 13.87, 6.61]
     
-    colors = ['#1f77b4', '#d62728', '#9467bd', '#2ca02c', '#8c564b']
+    colors = ['#1f77b4', '#d62728', '#9467bd', '#8c564b', '#2ca02c', '#bcbd22']
     
-    fig, axes = plt.subplots(1, 2, figsize=(15, 6), dpi=300)
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6.5), dpi=300)
     
     # Left Panel: Total Cost comparison
     bars_cost = axes[0].bar(policies, total_costs, color=colors, edgecolor='black', linewidth=0.7, width=0.55)
