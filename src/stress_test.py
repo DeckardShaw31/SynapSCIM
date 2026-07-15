@@ -3,7 +3,7 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 from env import MultiEchelonSupplyChainEnv
-from bdh import BDH_GPU
+from bdh import BDH_GPU, MLP_GPU
 from ppo import get_history
 from willems_loader import get_willems_config, get_deterministic_demands
 from baselines import tune_baselines
@@ -51,7 +51,7 @@ def run_stress_test_simulation(env, policy_type, policy_model, eval_demands_shoc
             env.max_ship = original_max_ship
             
         # 2. Get action depending on policy type
-        if policy_type == "bdh_ppo":
+        if policy_type in ["bdh_ppo", "mlp_ppo"]:
             t = len(episode_obs) - 1
             hist_obs = get_history(episode_obs, t, T_context)
             device = next(policy_model.parameters()).device
@@ -168,8 +168,9 @@ def run_stress_test(network_id=1, model_path_ppo=None, model_path_mappo_wh="bdh_
     # Search candidates for MAPPO if defaults are specified
     if model_path_mappo_wh == "bdh_mappo_wh.pt" and model_path_mappo_ret == "bdh_mappo_ret.pt":
         for cand_wh, cand_ret in [
-            ("SynapSCIM_checkpoints/bdh_mappo_wh_20000.pt", "SynapSCIM_checkpoints/bdh_mappo_ret_20000.pt"),
-            ("SynapSCIM_checkpoints/bdh_mappo_wh.pt", "SynapSCIM_checkpoints/bdh_mappo_ret.pt"),
+            (f"SynapSCIM_mappo_checkpoints/bdh_mappo_wh_{network_id}_20000.pt", f"SynapSCIM_mappo_checkpoints/bdh_mappo_ret_{network_id}_20000.pt"),
+            ("SynapSCIM_mappo_checkpoints/bdh_mappo_wh_20000.pt", "SynapSCIM_mappo_checkpoints/bdh_mappo_ret_20000.pt"),
+            ("SynapSCIM_mappo_checkpoints/bdh_mappo_wh.pt", "SynapSCIM_mappo_checkpoints/bdh_mappo_ret.pt"),
             ("bdh_mappo_wh.pt", "bdh_mappo_ret.pt")
         ]:
             if os.path.exists(cand_wh) and os.path.exists(cand_ret):
@@ -203,6 +204,24 @@ def run_stress_test(network_id=1, model_path_ppo=None, model_path_mappo_wh="bdh_
     model_ma_wh.eval()
     model_ma_ret.eval()
     
+    # 2.5 Load MLP-PPO baseline model
+    bdh_model_mlp = MLP_GPU(obs_dim=obs_dim, act_dim=act_dim, hidden_dim=128).to(device)
+    mlp_path = "SynapSCIM_mlpppo_checkpoints/mlp_ppo_model_final.pt"
+    if os.path.exists(mlp_path):
+        print(f"Loading MLP-PPO weights from {mlp_path}...")
+        state_dict_mlp = torch.load(mlp_path, map_location=device)
+        from collections import OrderedDict
+        new_mlp = OrderedDict()
+        for k, v in state_dict_mlp.items():
+            if k.startswith("_orig_mod."):
+                new_mlp[k[10:]] = v
+            else:
+                new_mlp[k] = v
+        bdh_model_mlp.load_state_dict(new_mlp)
+    else:
+        print("[Warning] MLP-PPO weights not found. Using randomly initialized model.")
+    bdh_model_mlp.eval()
+    
     # 3. Instantiate tuned Base-Stock baseline
     bs_policy, _ = tune_baselines(env_ce, eval_demands_shock, steps=100)
     
@@ -210,6 +229,7 @@ def run_stress_test(network_id=1, model_path_ppo=None, model_path_mappo_wh="bdh_
     print("Simulating policies under disruption shock (Days 30-50)...")
     res_ppo = run_stress_test_simulation(env_ce, "bdh_ppo", bdh_model_ppo, eval_demands_shock)
     res_mappo = run_stress_test_simulation(env_ma, "mappo", (model_ma_wh, model_ma_ret), eval_demands_shock)
+    res_mlp = run_stress_test_simulation(env_ce, "mlp_ppo", bdh_model_mlp, eval_demands_shock)
     res_bs = run_stress_test_simulation(env_ce, "base_stock", bs_policy, eval_demands_shock)
     
     # 5. Plot comparisons
@@ -222,6 +242,7 @@ def run_stress_test(network_id=1, model_path_ppo=None, model_path_mappo_wh="bdh_
     # Subplot 1: Cumulative Cost comparison
     axes[0].plot(res_ppo["cumulative_cost"], label="BDH-PPO (Centralized Coordinated)", color="#1f77b4", linewidth=2.5)
     axes[0].plot(res_mappo["cumulative_cost"], label="MAPPO (Decentralized Information-Gap)", color="#d62728", linewidth=2, linestyle="--")
+    axes[0].plot(res_mlp["cumulative_cost"], label="MLP-PPO (Centralized DRL Baseline)", color="#9467bd", linewidth=2, linestyle="-.")
     axes[0].plot(res_bs["cumulative_cost"], label="Base-Stock (Standard Industry Heuristic)", color="#2ca02c", linewidth=2)
     axes[0].axvspan(30, 50, color='red', alpha=0.15, label='Logistics Disruption Outage & Demand Surge')
     axes[0].set_title("Operational Cumulative Cost Reaction under Extreme Disruption Shock", fontsize=12, fontweight='bold')
@@ -232,10 +253,12 @@ def run_stress_test(network_id=1, model_path_ppo=None, model_path_mappo_wh="bdh_
     # Subplot 2: Total On-Hand Retailer Inventory comparison
     ppo_sum_stock = [np.sum(s) for s in res_ppo["ret_stock"]]
     mappo_sum_stock = [np.sum(s) for s in res_mappo["ret_stock"]]
+    mlp_sum_stock = [np.sum(s) for s in res_mlp["ret_stock"]]
     bs_sum_stock = [np.sum(s) for s in res_bs["ret_stock"]]
     
     axes[1].plot(ppo_sum_stock, label="BDH-PPO", color="#1f77b4", linewidth=2.5)
     axes[1].plot(mappo_sum_stock, label="MAPPO", color="#d62728", linewidth=2, linestyle="--")
+    axes[1].plot(mlp_sum_stock, label="MLP-PPO (Baseline)", color="#9467bd", linewidth=2, linestyle="-.")
     axes[1].plot(bs_sum_stock, label="Base-Stock", color="#2ca02c", linewidth=2)
     axes[1].axvspan(30, 50, color='red', alpha=0.15)
     axes[1].set_title("Total Retailer On-Hand Inventory Levels", fontsize=12, fontweight='bold')
@@ -246,10 +269,12 @@ def run_stress_test(network_id=1, model_path_ppo=None, model_path_mappo_wh="bdh_
     # Subplot 3: Total Retailer Backorders (Shortages) comparison
     ppo_sum_bo = [np.sum(b) for b in res_ppo["backorders"]]
     mappo_sum_bo = [np.sum(b) for b in res_mappo["backorders"]]
+    mlp_sum_bo = [np.sum(b) for b in res_mlp["backorders"]]
     bs_sum_bo = [np.sum(b) for b in res_bs["backorders"]]
     
     axes[2].plot(ppo_sum_bo, label="BDH-PPO", color="#1f77b4", linewidth=2.5)
     axes[2].plot(mappo_sum_bo, label="MAPPO", color="#d62728", linewidth=2, linestyle="--")
+    axes[2].plot(mlp_sum_bo, label="MLP-PPO (Baseline)", color="#9467bd", linewidth=2, linestyle="-.")
     axes[2].plot(bs_sum_bo, label="Base-Stock", color="#2ca02c", linewidth=2)
     axes[2].axvspan(30, 50, color='red', alpha=0.15)
     axes[2].set_title("Total Retailer Customer Backorders (Shortages)", fontsize=12, fontweight='bold')
