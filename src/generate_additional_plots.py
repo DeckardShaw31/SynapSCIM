@@ -12,14 +12,14 @@ def generate_detailed_plots():
     mlp_log_path = "SynapSCIM_mlpppo_checkpoints/training_log.csv"
     gnn_log_path = "SynapSCIM_gnn_checkpoints/training_log.csv"
     
-    df_ppo = pd.read_csv(ppo_log_path)
-    df_mappo = pd.read_csv(mappo_log_path)
-    df_mlp = pd.read_csv(mlp_log_path)
+    df_ppo = pd.read_csv(ppo_log_path).drop_duplicates(subset=['iteration']).sort_values(by='iteration').reset_index(drop=True)
+    df_mappo = pd.read_csv(mappo_log_path).drop_duplicates(subset=['iteration']).sort_values(by='iteration').reset_index(drop=True)
+    df_mlp = pd.read_csv(mlp_log_path).drop_duplicates(subset=['iteration']).sort_values(by='iteration').reset_index(drop=True)
     
     has_gnn = os.path.exists(gnn_log_path)
     if has_gnn:
         print("Found GNN-PPO training log. Loading GNN curves...")
-        df_gnn = pd.read_csv(gnn_log_path)
+        df_gnn = pd.read_csv(gnn_log_path).drop_duplicates(subset=['iteration']).sort_values(by='iteration').reset_index(drop=True)
     else:
         print("[Warning] GNN-PPO training log not found at SynapSCIM_gnn_checkpoints/training_log.csv.")
     
