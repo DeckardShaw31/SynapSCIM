@@ -18,15 +18,18 @@ os.makedirs("paper_materials/centralized_ppo", exist_ok=True)
 os.makedirs("paper_materials/decentralized_mappo", exist_ok=True)
 
 def run_simulations(network_id=1):
-    print("Dynamically calculating echelon bullwhip ratios...")
+    print("Dynamically calculating echelon bullwhip ratios (with 0.2 scale to prevent saturation)...")
     
     config = get_willems_config(network_id)
     eval_demands = get_deterministic_demands(network_id=network_id, steps=100, seed=42)
+    # Scale demands down by 0.2 to prevent saturation and measure true steady state variance dampening
+    eval_demands_scaled = [np.array(d) * 0.2 for d in eval_demands]
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # ------------------ 1. BDH-PPO ------------------
     env = MultiEchelonSupplyChainEnv(config, mode="centralized")
-    env.eval_demand = eval_demands
+    env.eval_demand = eval_demands_scaled
     obs_dim = env.observation_space.shape[0]
     act_dim = env.action_space.shape[0]
     
@@ -41,13 +44,17 @@ def run_simulations(network_id=1):
     model_bdh.eval()
     
     obs, _ = env.reset(seed=42)
+    # Start with full stocks to analyze steady-state dampening
+    env.ret_stocks = np.array(env.cap_retailers, dtype=np.float32)
+    env.wh_stock = env.cap_warehouse
     obs = env.get_obs()
+    
     episode_obs = [obs]
     bdh_retailer_orders = []
     bdh_warehouse_orders = []
     customer_demands = []
     
-    steps = len(eval_demands) - env.hist_len
+    steps = len(eval_demands_scaled) - env.hist_len
     for step in range(steps):
         t = len(episode_obs) - 1
         hist_obs = get_history(episode_obs, t, 10)
@@ -69,7 +76,7 @@ def run_simulations(network_id=1):
     
     # ------------------ 2. MLP-PPO ------------------
     env_mlp = MultiEchelonSupplyChainEnv(config, mode="centralized")
-    env_mlp.eval_demand = eval_demands
+    env_mlp.eval_demand = eval_demands_scaled
     model_mlp = MLP_GPU(obs_dim=obs_dim, act_dim=act_dim, hidden_dim=128).to(device)
     mlp_path = "SynapSCIM_mlpppo_checkpoints/mlp_ppo_model_final.pt"
     if os.path.exists(mlp_path):
@@ -81,6 +88,8 @@ def run_simulations(network_id=1):
     model_mlp.eval()
     
     obs, _ = env_mlp.reset(seed=42)
+    env_mlp.ret_stocks = np.array(env_mlp.cap_retailers, dtype=np.float32)
+    env_mlp.wh_stock = env_mlp.cap_warehouse
     obs = env_mlp.get_obs()
     episode_obs_mlp = [obs]
     mlp_retailer_orders = []
@@ -106,7 +115,7 @@ def run_simulations(network_id=1):
 
     # ------------------ 3. MAPPO ------------------
     env_ma = MultiEchelonSupplyChainEnv(config, mode="multi_agent")
-    env_ma.eval_demand = eval_demands
+    env_ma.eval_demand = eval_demands_scaled
     wh_obs_dim = env_ma.observation_spaces["warehouse"].shape[0]
     max_ret_obs_dim = max(env_ma.observation_spaces[f"retailer_{i}"].shape[0] for i in range(env_ma.num_retailers))
     
@@ -133,6 +142,8 @@ def run_simulations(network_id=1):
     model_ma_ret.eval()
     
     obs_dict, _ = env_ma.reset(seed=42)
+    env_ma.ret_stocks = np.array(env_ma.cap_retailers, dtype=np.float32)
+    env_ma.wh_stock = env_ma.cap_warehouse
     obs_dict = env_ma.get_obs()
     
     hidden_wh = model_ma_wh.init_recurrent_states(1, device)
@@ -168,10 +179,12 @@ def run_simulations(network_id=1):
 
     # ------------------ 4. Base-Stock ------------------
     env_bs = MultiEchelonSupplyChainEnv(config, mode="centralized")
-    env_bs.eval_demand = eval_demands
-    bs_policy, _ = tune_baselines(env_bs, eval_demands, steps=100)
+    env_bs.eval_demand = eval_demands_scaled
+    bs_policy, _ = tune_baselines(env_bs, eval_demands_scaled, steps=100)
     
     obs, _ = env_bs.reset(seed=42)
+    env_bs.ret_stocks = np.array(env_bs.cap_retailers, dtype=np.float32)
+    env_bs.wh_stock = env_bs.cap_warehouse
     obs = env_bs.get_obs()
     bs_retailer_orders = []
     bs_warehouse_orders = []
