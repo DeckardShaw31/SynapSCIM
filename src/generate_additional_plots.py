@@ -41,7 +41,7 @@ def generate_detailed_plots():
     axes[0, 0].set_xlabel('Iteration', fontsize=10, fontweight='bold')
     axes[0, 0].set_ylabel('Average Step Reward', fontsize=10, fontweight='bold')
     axes[0, 0].set_title('Reward Convergence Curve', fontsize=11, fontweight='bold')
-    axes[0, 0].legend(loc='lower right')
+    axes[0, 0].legend(loc='upper right')
     axes[0, 0].grid(True, linestyle=':', alpha=0.6)
     
     # 2. Top-Right: Fill Rate Comparison
