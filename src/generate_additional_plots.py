@@ -64,7 +64,7 @@ def generate_detailed_plots():
     axes[1, 1].plot(df_mlp['iteration'], smooth(df_mlp['actor_loss']), label='MLP-PPO (Baseline)', color='#9467bd', linewidth=1.2, linestyle='-.', alpha=0.8)
     axes[1, 1].set_xlabel('Iteration', fontsize=10, fontweight='bold')
     axes[1, 1].set_ylabel('Actor Loss', fontsize=10, fontweight='bold')
-    axes[1, 1].set_title('Actor Policy Policy Gradient Loss', fontsize=11, fontweight='bold')
+    axes[1, 1].set_title('Actor Policy Gradient Loss', fontsize=11, fontweight='bold')
     axes[1, 1].legend(loc='upper right')
     axes[1, 1].grid(True, linestyle=':', alpha=0.6)
     
