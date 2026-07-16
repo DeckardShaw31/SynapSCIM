@@ -23,6 +23,11 @@ Plan(Phase 1 - DONE).md
 Plan(Phase 2).md
 scratch/
 tests/__pycache__/
+src/generate_academic_plots.py
+src/generate_additional_plots.py
+src/generate_final_plots.py
+src/generate_report.py
+
 
 SynapSCIM_mlp_checkpoints/
 SynapSCIM_mlpppo_checkpoints/*

@@ -7,7 +7,11 @@ from bdh import BDH_GPU, MLP_GPU, GNN_PPO_Model
 from ppo import get_history
 from willems_loader import get_willems_config, get_deterministic_demands
 from baselines import tune_baselines
-from generate_report import pad_obs
+def pad_obs(obs, target_dim):
+    if len(obs) < target_dim:
+        return np.pad(obs, (0, target_dim - len(obs)), mode='constant')
+    return obs[:target_dim]
+
 
 def run_stress_test_simulation(env, policy_type, policy_model, eval_demands_shock, T_context=10):
     env.eval_demand = eval_demands_shock
